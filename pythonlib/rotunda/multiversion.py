@@ -327,7 +327,12 @@ def install_versioned(fetcher, replace: bool = False) -> bool:
         install_path.mkdir(parents=True, exist_ok=True)
 
         with tempfile.NamedTemporaryFile() as temp_file:
-            fetcher.download_file(temp_file, fetcher.url)
+            expected_sha256 = (
+                fetcher._selected_version.expected_sha256
+                if fetcher._selected_version is not None
+                else None
+            )
+            fetcher.download_file(temp_file, fetcher.url, expected_sha256=expected_sha256)
             rprint(f'Extracting Rotunda: {install_path}')
             unzip(temp_file, str(install_path))
 

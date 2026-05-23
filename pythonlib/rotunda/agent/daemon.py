@@ -17,6 +17,7 @@ from playwright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from .dom import DomDiff, render_action_change
 from .dom_serializer import DOMSerializer, DOMSnapshot
+from .paths import AGENT_HOME
 from .runtime import (
     AGENT_HOST,
     AGENT_IDENTITY_SERVICE,
@@ -28,6 +29,30 @@ from .runtime import (
 from .store import AgentStore
 
 AGENT_REQUEST_TIMEOUT_SECONDS = 70.0
+
+# Sandbox directory for all file output (screenshots, downloads).
+# Paths provided by callers are resolved relative to this root and must not
+# escape it.  Override by setting ROTUNDA_OUTPUT_DIR in the environment.
+_OUTPUT_SANDBOX: Path = Path(
+    os.environ.get("ROTUNDA_OUTPUT_DIR", str(AGENT_HOME / "output"))
+).resolve()
+
+
+def _safe_output_path(requested: str) -> Path:
+    """Resolve *requested* to a path inside _OUTPUT_SANDBOX.
+
+    Raises ValueError if the resolved path would escape the sandbox
+    (i.e. path-traversal attempt via '..' or absolute paths outside the root).
+    """
+    candidate = Path(os.path.normpath(_OUTPUT_SANDBOX / requested)).resolve()
+    try:
+        candidate.relative_to(_OUTPUT_SANDBOX)
+    except ValueError:
+        raise ValueError(
+            f"Path traversal attempt blocked: '{requested}' resolves outside "
+            f"the output sandbox '{_OUTPUT_SANDBOX}'."
+        ) from None
+    return candidate
 AGENT_ROUTE_TIMEOUT_SECONDS = {
     "/back": 70.0,
     "/check": 25.0,
@@ -470,7 +495,7 @@ class AgentDaemon:
     ) -> dict[str, Any]:
         async with self._page_lock(page_id):
             page = self._page(page_id)
-            output = Path(path)
+            output = _safe_output_path(path)
             output.parent.mkdir(parents=True, exist_ok=True)
             if ref:
                 serializer = await self._serializer_for(page_id, page)
@@ -630,7 +655,7 @@ class AgentDaemon:
             download = self._download_objects[download_id]
         except KeyError:
             raise KeyError(f"Unknown download: {download_id}") from None
-        output = Path(path)
+        output = _safe_output_path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
         await download.save_as(str(output))
         self.downloads[download_id]["saved_as"] = str(output)

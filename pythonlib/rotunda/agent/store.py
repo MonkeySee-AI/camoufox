@@ -91,7 +91,7 @@ class AgentStore:
 
     def save_session(self, profile_id: str, session: dict[str, Any]) -> None:
         path = self.session_path(profile_id)
-        self._atomic_write_json(path, session)
+        self._atomic_write_json(path, session, mode=0o600)
 
     def remove_session(self, profile_id: str) -> None:
         path = self.session_path(profile_id)
@@ -311,8 +311,14 @@ class AgentStore:
             runtime_id=raw.get("runtime_id"),
         )
 
-    def _atomic_write_json(self, path: Path, payload: dict[str, Any]) -> None:
+    def _atomic_write_json(self, path: Path, payload: dict[str, Any], *, mode: int | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        # Create with restrictive perms before writing content
+        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode or 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
         tmp_path.replace(path)
+        if mode is not None:
+            with suppress(OSError):
+                os.chmod(path, mode)

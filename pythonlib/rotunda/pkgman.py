@@ -1,3 +1,4 @@
+import hashlib
 import os
 import platform
 import re
@@ -348,6 +349,8 @@ class AvailableVersion:
     asset_id: int | None = None
     asset_size: int | None = None
     asset_updated_at: str | None = None
+    # Optional pinned SHA-256 checksum for integrity verification
+    expected_sha256: str | None = None
 
     @property
     def display(self) -> str:
@@ -436,12 +439,34 @@ class RotundaFetcher(GitHubDownloader):
         self._version_obj, self._url = self.get_asset()
 
     @staticmethod
-    def download_file(file: DownloadBuffer, url: str) -> DownloadBuffer:
+    def download_file(file: DownloadBuffer, url: str, *, expected_sha256: str | None = None) -> DownloadBuffer:
         """
-        Download a file from the given URL
+        Download a file from the given URL.
+        If expected_sha256 is provided, verifies the integrity of the downloaded file.
+        Raises ValueError if the checksum does not match.
         """
         rprint(f'Downloading package: {url}')
-        return webdl(url, buffer=file)
+        result = webdl(url, buffer=file)
+        # Compute SHA-256 of downloaded content
+        result.seek(0)
+        sha256 = hashlib.sha256(result.read()).hexdigest()
+        result.seek(0)
+        if expected_sha256:
+            if sha256.lower() != expected_sha256.lower():
+                raise ValueError(
+                    f"Binary integrity check FAILED for {url}\n"
+                    f"  Expected SHA-256: {expected_sha256}\n"
+                    f"  Actual  SHA-256: {sha256}\n"
+                    "Download aborted — the file may be tampered or corrupted."
+                )
+            rprint(f"[green]SHA-256 verified: {sha256}[/green]")
+        else:
+            rprint(
+                f"[yellow]WARNING: No expected SHA-256 provided for {url}.\n"
+                f"         Downloaded file SHA-256: {sha256}\n"
+                "         Pin this checksum to enable integrity verification.[/yellow]"
+            )
+        return result
 
     def extract_zip(self, zip_file: DownloadBuffer) -> None:
         """

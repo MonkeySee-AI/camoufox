@@ -4,12 +4,10 @@ Helpers to find the user's public IP address for geolocation.
 
 import re
 import warnings
-from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache, lru_cache
 
 import requests
-from urllib3.exceptions import InsecureRequestWarning
 
 from ..exceptions import InvalidIP, InvalidProxy
 
@@ -77,13 +75,6 @@ def validate_ip(ip: str) -> None:
         raise InvalidIP(f"Invalid IP address: {ip}")
 
 
-@contextmanager
-def _suppress_insecure_warning():
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-        yield
-
-
 @cache
 def public_ip(proxy: str | None = None) -> str:
     """
@@ -103,13 +94,12 @@ def public_ip(proxy: str | None = None) -> str:
     end_exception = None
     for url in urls:
         try:
-            with _suppress_insecure_warning():
-                resp = requests.get(  # nosec
-                    url,
-                    proxies=Proxy.as_requests_proxy(proxy) if proxy else None,
-                    timeout=5,
-                    verify=False,
-                )
+            resp = requests.get(
+                url,
+                proxies=Proxy.as_requests_proxy(proxy) if proxy else None,
+                timeout=5,
+                verify=True,  # Always verify SSL certificates
+            )
             resp.raise_for_status()
             ip = resp.text.strip()
             validate_ip(ip)
