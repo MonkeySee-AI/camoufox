@@ -14,15 +14,27 @@ Do not use Rotunda for bulk crawling, scraping at scale, or bypassing access con
 
 ## Install And Bootstrap
 
-Rotunda can be used without adding it to the current project:
+Use `uvx rotunda ...` by default. `uvx` runs the Rotunda CLI in an ephemeral environment, so agents can use Rotunda without installing it into the current project or assuming `rotunda` is already on `PATH`.
+
+All commands below are written with `uvx`. If Rotunda is installed locally, the equivalent `rotunda ...` command may also work, but `uvx rotunda ...` is the safest portable form for agent workflows.
+
+The canonical command reference is always the installed CLI help:
+
+```bash
+uvx rotunda --help
+uvx rotunda agent --help
+uvx rotunda agent <command> --help
+```
+
+If a command fails, an option appears stale, or this skill disagrees with the CLI, check `uvx rotunda --help` and the relevant subcommand help first.
+
+Bootstrap the Rotunda browser build before the first browser session:
 
 ```bash
 uvx rotunda fetch
 ```
 
-`rotunda fetch` syncs available browser builds and installs the active Rotunda browser. Run it once before the first browser session, and rerun it if launch fails because the browser build is missing.
-
-If Rotunda is installed in the current environment, `rotunda ...` may also work. Prefer `uvx rotunda ...` in skills and agent workflows because it does not assume project dependencies.
+`uvx rotunda fetch` syncs available browser builds and installs the active Rotunda browser. Run it once before the first browser session, and rerun it if launch fails because the browser build is missing.
 
 ## Mental Model
 
