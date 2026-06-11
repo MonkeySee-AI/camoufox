@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import rich_click as click
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
+from ..settings import RotundaSettings
 from .dom import DomDiff, render_action_change
 from .dom_serializer import DOMSerializer, DOMSnapshot
 from .runtime import (
@@ -1358,9 +1359,9 @@ def _scroll_delta(direction: str, amount: int) -> dict[str, int]:
 
 
 def _resolve_agent_rotunda_executable(env: dict[str, Any]) -> str:
-    executable_path = env.get("ROTUNDA_EXECUTABLE_PATH")
+    executable_path = RotundaSettings.from_env(env).executable_path
     if executable_path:
-        return str(executable_path)
+        return executable_path
     return resolve_installed_rotunda_executable()
 
 

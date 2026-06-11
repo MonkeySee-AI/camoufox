@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import os
 import re
 import threading
 import time
@@ -12,6 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from ._generated_profile import RotundaProfile
+from .settings import (
+    ROTUNDA_VM_ACCESS_BUFFERED,
+    ROTUNDA_VM_ACCESS_LOG,
+    ROTUNDA_VM_ACCESS_LOG_FILE,
+    ROTUNDA_VM_ACCESS_REALM,
+    ROTUNDA_VM_ACCESS_RETURNS,
+    RotundaSettings,
+    env_snapshot,
+)
 
 DEFAULT_SECTIONS = {
     "manifest",
@@ -56,21 +64,21 @@ class DebugDump:
 
     @classmethod
     def from_env(cls, env: dict[str, Any] | None = None) -> DebugDump | None:
-        source = env if env is not None else os.environ
-        directory = source.get("ROTUNDA_DEBUG_DUMP_DIR")
+        settings = RotundaSettings.from_env(env)
+        directory = settings.debug_dump_dir
         if not directory:
             return None
 
-        sections_value = str(source.get("ROTUNDA_DEBUG_DUMP") or "all")
+        sections_value = settings.debug_dump or "all"
         sections = _parse_sections(sections_value)
         if not sections:
             return None
 
         return cls(
-            Path(str(directory)).expanduser().resolve(),
+            Path(directory).expanduser().resolve(),
             sections,
-            max_body_bytes=_env_int(source.get("ROTUNDA_DEBUG_DUMP_MAX_BODY"), 1_048_576),
-            raw=_env_flag(source.get("ROTUNDA_DEBUG_DUMP_RAW")),
+            max_body_bytes=settings.debug_dump_max_body,
+            raw=settings.debug_dump_raw,
         )
 
     def enabled(self, section: str) -> bool:
@@ -131,12 +139,12 @@ def configure_launch_debug_dump(
 
     executable = Path(executable_path)
     if dump.enabled("vm"):
-        env.setdefault("ROTUNDA_VM_ACCESS_LOG", "1")
-        env.setdefault("ROTUNDA_VM_ACCESS_LOG_FILE", str(dump.path("vm-access.log")))
-        env.setdefault("ROTUNDA_VM_ACCESS_BUFFERED", "1")
-        env.setdefault("ROTUNDA_VM_ACCESS_REALM", "1")
+        env.setdefault(ROTUNDA_VM_ACCESS_LOG, "1")
+        env.setdefault(ROTUNDA_VM_ACCESS_LOG_FILE, str(dump.path("vm-access.log")))
+        env.setdefault(ROTUNDA_VM_ACCESS_BUFFERED, "1")
+        env.setdefault(ROTUNDA_VM_ACCESS_REALM, "1")
     if dump.enabled("returns"):
-        env.setdefault("ROTUNDA_VM_ACCESS_RETURNS", "1")
+        env.setdefault(ROTUNDA_VM_ACCESS_RETURNS, "1")
 
     dump.update_manifest(
         "launch",
@@ -146,30 +154,7 @@ def configure_launch_debug_dump(
             "xul": _xul_fingerprints(executable),
             "firefox_user_prefs": firefox_user_prefs,
             "config": config.model_dump(by_alias=True, exclude_none=True, mode="json"),
-            "env": {
-                "ROTUNDA_CONFIG_PATH": env.get("ROTUNDA_CONFIG_PATH"),
-                "ROTUNDA_DEBUG_DUMP": env.get("ROTUNDA_DEBUG_DUMP"),
-                "ROTUNDA_DEBUG_DUMP_DIR": env.get("ROTUNDA_DEBUG_DUMP_DIR"),
-                "ROTUNDA_VM_ACCESS_LOG": env.get("ROTUNDA_VM_ACCESS_LOG"),
-                "ROTUNDA_VM_ACCESS_LOG_FILE": env.get("ROTUNDA_VM_ACCESS_LOG_FILE"),
-                "ROTUNDA_VM_ACCESS_BUFFERED": env.get("ROTUNDA_VM_ACCESS_BUFFERED"),
-                "ROTUNDA_VM_ACCESS_REALM": env.get("ROTUNDA_VM_ACCESS_REALM"),
-                "ROTUNDA_VM_ACCESS_RETURNS": env.get("ROTUNDA_VM_ACCESS_RETURNS"),
-                "ROTUNDA_VM_ACCESS_VALUE_STRINGS": env.get(
-                    "ROTUNDA_VM_ACCESS_VALUE_STRINGS"
-                ),
-                "ROTUNDA_VM_ACCESS_FUNCTION_NAMES": env.get(
-                    "ROTUNDA_VM_ACCESS_FUNCTION_NAMES"
-                ),
-                "ROTUNDA_VM_ACCESS_FILTER": env.get("ROTUNDA_VM_ACCESS_FILTER"),
-                "ROTUNDA_VM_ACCESS_OBJECT_FILTER": env.get("ROTUNDA_VM_ACCESS_OBJECT_FILTER"),
-                "ROTUNDA_VM_ACCESS_MAX_ARGS": env.get("ROTUNDA_VM_ACCESS_MAX_ARGS"),
-                "ROTUNDA_VM_ACCESS_MAX_STRING": env.get("ROTUNDA_VM_ACCESS_MAX_STRING"),
-                "ROTUNDA_VM_ACCESS_MAX_QUEUE_BYTES": env.get(
-                    "ROTUNDA_VM_ACCESS_MAX_QUEUE_BYTES"
-                ),
-                "ROTUNDA_VM_ACCESS_SAMPLE_RATE": env.get("ROTUNDA_VM_ACCESS_SAMPLE_RATE"),
-            },
+            "env": env_snapshot(env),
         },
     )
 
@@ -441,20 +426,6 @@ def _parse_sections(value: str) -> set[str]:
     if "returns" in sections:
         sections.add("vm")
     return sections
-
-
-def _env_flag(value: Any) -> bool:
-    if value is None:
-        return False
-    return str(value).lower() not in {"", "0", "false", "no"}
-
-
-def _env_int(value: Any, fallback: int) -> int:
-    try:
-        parsed = int(str(value))
-    except Exception:
-        return fallback
-    return max(0, parsed)
 
 
 def _file_fingerprint(path: Path) -> dict[str, Any]:

@@ -48,6 +48,7 @@ from .pkgman import (
     list_available_versions,
     rprint,
 )
+from .settings import RotundaSettings
 
 
 def _inquirer_select(
@@ -776,7 +777,7 @@ def test(
     from .fingerprints import generate_fingerprint
     from .sync_api import NewContext, Rotunda
 
-    executable_path = executable_path or environ.get("ROTUNDA_EXECUTABLE_PATH")
+    executable_path = executable_path or RotundaSettings().executable_path
     if executable_path:
         if not Path(executable_path).exists():
             hint = ""
