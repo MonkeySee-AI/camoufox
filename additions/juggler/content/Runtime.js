@@ -53,6 +53,14 @@ const disallowedMessageCategories = new Set([
   'xbl javascript',
 ]);
 
+function scriptLocationFromConsoleMessage(message) {
+  return {
+    lineNumber: Number(message.lineNumber) || 0,
+    columnNumber: Number(message.columnNumber) || 0,
+    url: message.sourceName || '',
+  };
+}
+
 class Runtime {
   constructor(isWorker = false) {
     this._debugger = new Debugger();
@@ -134,7 +142,12 @@ class Runtime {
         }
         const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
         if (message.category === 'Web Worker' && message.logLevel === Ci.nsIConsoleMessage.error) {
-          emitEvent(this.events.onErrorFromWorker, errorWindow, message.message, '' + message.stack);
+          emitEvent(this.events.onErrorFromWorker, {
+            domWindow: errorWindow,
+            message: message.message,
+            stack: '' + message.stack,
+            location: scriptLocationFromConsoleMessage(message),
+          });
           return;
         }
         const executionContext = this._windowToExecutionContext.get(errorWindow);
@@ -154,17 +167,14 @@ class Runtime {
             }],
             type: typeNames[message.logLevel],
             executionContextId: executionContext.id(),
-            location: {
-              lineNumber: message.lineNumber,
-              columnNumber: message.columnNumber,
-              url: message.sourceName,
-            },
+            location: scriptLocationFromConsoleMessage(message),
           });
         } else {
           emitEvent(this.events.onRuntimeError, {
             executionContext,
             message: message.errorMessage,
             stack: message.stack.toString(),
+            location: scriptLocationFromConsoleMessage(message),
           });
         }
       },
