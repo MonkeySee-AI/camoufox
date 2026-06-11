@@ -773,6 +773,7 @@ const Page = {
       data: t.String,
       deviceWidth: t.Number,
       deviceHeight: t.Number,
+      timestamp: t.Number,
     },
   },
 
@@ -994,7 +995,7 @@ const Page = {
     },
     'screencastFrameAck': {
       params: {
-        screencastId: t.String,
+        screencastId: t.Optional(t.String),
       },
     },
     'stopScreencast': {

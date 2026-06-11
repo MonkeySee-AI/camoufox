@@ -18,6 +18,7 @@
 #include "nsIRandomGenerator.h"
 #include "nsISupportsPrimitives.h"
 #include "nsThreadManager.h"
+#include "mozilla/TimeStamp.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_frame.h"
@@ -42,6 +43,11 @@ namespace {
 const int kMaxFramesInFlight = 1;
 
 StaticRefPtr<nsScreencastService> gScreencastService;
+
+double ScreencastTimestampSeconds() {
+  static const TimeStamp startedAt = TimeStamp::Now();
+  return (TimeStamp::Now() - startedAt).ToSeconds();
+}
 
 webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> CreateWindowCapturer(nsIWidget* widget) {
   if (gfxPlatform::IsHeadless()) {
@@ -276,12 +282,13 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     }
 
     mFramesInFlight.fetch_add(1);
+    double timestamp = ScreencastTimestampSeconds();
     NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "NotifyScreencastFrame", [this, protect = RefPtr{this}, base64, pageWidth, pageHeight]() -> void {
+        "NotifyScreencastFrame", [this, protect = RefPtr{this}, base64, pageWidth, pageHeight, timestamp]() -> void {
           if (mStopped)
             return;
           NS_ConvertUTF8toUTF16 utf16(base64);
-          mClient->ScreencastFrame(utf16, pageWidth, pageHeight);
+          mClient->ScreencastFrame(utf16, pageWidth, pageHeight, timestamp);
         }));
   }
 
