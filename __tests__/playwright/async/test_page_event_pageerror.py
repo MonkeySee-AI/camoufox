@@ -56,6 +56,13 @@ async def test_delayed_uncaught_page_error_keeps_driver_alive(page: Page) -> Non
     assert error.message == "boom"
     assert await page.evaluate("() => 2 + 2") == 4
 
+    second_page = await page.context.new_page()
+    try:
+        await second_page.goto("data:text/html,<title>still alive</title>")
+        assert await second_page.title() == "still alive"
+    finally:
+        await second_page.close()
+
 
 async def test_page_errors_filter_since_navigation_drops_pre_nav_errors(
     page: Page, server: Server
