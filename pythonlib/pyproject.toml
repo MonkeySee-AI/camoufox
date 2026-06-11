@@ -32,11 +32,9 @@ dependencies = [
     "numpy",
     "orjson",
     "platformdirs",
-    # NOTE: The remote Juggler bridge imports Playwright's private
-    # driver path `lib/server/utils/debugLogger.js`, which exists in
-    # Playwright >=1.51.0. In Playwright 1.50.0 this module lived at
-    # `lib/utils/debugLogger.js`, so `lib/server/utils/debugLogger.js`
-    # does not exist and the bridge exits before reporting an endpoint.
+    # NOTE: The remote Juggler bridge imports Playwright private driver
+    # internals. Playwright >=1.51.0 has the legacy modules it needs,
+    # while newer bundled drivers are handled by the bridge fallback.
     "playwright>=1.51.0",
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",

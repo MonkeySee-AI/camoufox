@@ -9,13 +9,78 @@ const { randomUUID } = require('crypto');
 
 const packageRoot = process.env.PLAYWRIGHT_PACKAGE_ROOT || process.cwd();
 
-const { PlaywrightServer } = require(`${packageRoot}/lib/remote/playwrightServer.js`);
-const { createPlaywright } = require(`${packageRoot}/lib/server/playwright.js`);
-const { helper } = require(`${packageRoot}/lib/server/helper.js`);
-const { FFBrowser } = require(`${packageRoot}/lib/server/firefox/ffBrowser.js`);
-const { WebSocketTransport } = require(`${packageRoot}/lib/server/transport.js`);
-const { RecentLogsCollector } = require(`${packageRoot}/lib/server/utils/debugLogger.js`);
-const { removeFolders } = require(`${packageRoot}/lib/server/utils/fileUtils.js`);
+function requireFromPackage(relativePath) {
+  return require(path.join(packageRoot, relativePath));
+}
+
+function debugProtocolLoggerFrom(debugLogger) {
+  return protocolLogger => (direction, message) => {
+    if (protocolLogger)
+      protocolLogger(direction, message);
+    if (!debugLogger?.isEnabled?.('protocol'))
+      return;
+    let text = JSON.stringify(message);
+    if (text.length > 5120)
+      text = `${text.substring(0, 2560)} <<<<<( LOG TRUNCATED )>>>>> ${text.substring(text.length - 2560)}`;
+    debugLogger.log('protocol', `${direction === 'send' ? 'SEND' : 'RECV'} ${text}`);
+  };
+}
+
+function loadPlaywrightInternals() {
+  let legacyError;
+  try {
+    const { PlaywrightServer } = requireFromPackage('lib/remote/playwrightServer.js');
+    const { createPlaywright } = requireFromPackage('lib/server/playwright.js');
+    const { helper } = requireFromPackage('lib/server/helper.js');
+    const { WebSocketTransport } = requireFromPackage('lib/server/transport.js');
+    const { RecentLogsCollector } = requireFromPackage('lib/server/utils/debugLogger.js');
+    const { removeFolders } = requireFromPackage('lib/server/utils/fileUtils.js');
+    return {
+      PlaywrightServer,
+      createPlaywright,
+      debugProtocolLogger: helper.debugProtocolLogger,
+      WebSocketTransport,
+      RecentLogsCollector,
+      removeFolders,
+    };
+  } catch (error) {
+    legacyError = error;
+  }
+
+  try {
+    const coreBundle = requireFromPackage('lib/coreBundle.js');
+    const { remote, server, utils } = coreBundle;
+    const internals = {
+      PlaywrightServer: remote?.PlaywrightServer,
+      createPlaywright: server?.createPlaywright,
+      debugProtocolLogger: debugProtocolLoggerFrom(utils?.debugLogger),
+      WebSocketTransport: server?.WebSocketTransport,
+      RecentLogsCollector: utils?.RecentLogsCollector,
+      removeFolders: utils?.removeFolders,
+    };
+    for (const [name, value] of Object.entries(internals)) {
+      if (!value)
+        throw new Error(`Playwright coreBundle is missing ${name}`);
+    }
+    return internals;
+  } catch (bundleError) {
+    bundleError.message = [
+      `Unable to load Playwright internals from ${packageRoot}.`,
+      `Legacy layout error: ${legacyError?.message || legacyError}.`,
+      `Bundled layout error: ${bundleError.message}.`,
+    ].join(' ');
+    throw bundleError;
+  }
+}
+
+const {
+  PlaywrightServer,
+  createPlaywright,
+  debugProtocolLogger,
+  WebSocketTransport,
+  RecentLogsCollector,
+  removeFolders,
+} = loadPlaywrightInternals();
 
 function collectData() {
   return new Promise((resolve) => {
@@ -142,13 +207,13 @@ async function main() {
     tracesDir: options.tracesDir || artifactsDir,
     browserProcess,
     proxy: undefined,
-    protocolLogger: helper.debugProtocolLogger(),
+    protocolLogger: debugProtocolLogger(),
     browserLogsCollector: new RecentLogsCollector(),
     originalLaunchOptions: {
       firefoxUserPrefs: options.firefoxUserPrefs || {},
     },
   };
-  browser = await FFBrowser.connect(playwright, transport, browserOptions);
+  browser = await playwright.firefox.connectToTransport(transport, browserOptions);
 
   const wsPath = options.wsPath
     ? (options.wsPath.startsWith('/') ? options.wsPath : `/${options.wsPath}`)

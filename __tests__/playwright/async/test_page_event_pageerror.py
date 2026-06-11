@@ -45,6 +45,25 @@ async def test_clear_page_errors_should_drop_buffered_errors(page: Page) -> None
     assert not any(e.message == "first" for e in await page.page_errors())
 
 
+async def test_delayed_uncaught_page_error_keeps_driver_alive(page: Page) -> None:
+    async with page.expect_event("pageerror") as error_info:
+        await page.goto(
+            "data:text/html,"
+            "<script>setTimeout(() => { throw new Error('boom') }, 0)</script>"
+        )
+
+    error = await error_info.value
+    assert error.message == "boom"
+    assert await page.evaluate("() => 2 + 2") == 4
+
+    second_page = await page.context.new_page()
+    try:
+        await second_page.goto("data:text/html,<title>still alive</title>")
+        assert await second_page.title() == "still alive"
+    finally:
+        await second_page.close()
+
+
 async def test_page_errors_filter_since_navigation_drops_pre_nav_errors(
     page: Page, server: Server
 ) -> None:
