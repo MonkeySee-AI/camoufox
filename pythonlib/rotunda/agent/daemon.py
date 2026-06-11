@@ -673,7 +673,8 @@ class AgentDaemon:
             user_data_dir.mkdir(parents=True, exist_ok=True)
             headless = bool(self.profile.get("headless", False))
             humanize = bool(self.profile.get("humanize", True))
-            executable_path = resolve_installed_rotunda_executable()
+            env: dict[str, str | int | float] = dict(os.environ)
+            executable_path = _resolve_agent_rotunda_executable(env)
 
             self.playwright = await async_playwright().start()
             from rotunda.utils import (
@@ -682,7 +683,6 @@ class AgentDaemon:
                 runtime_profile_init_script,
             )
 
-            env: dict[str, str | int | float] = dict(os.environ)
             opts = await asyncio.to_thread(
                 launch_options,
                 headless=headless,
@@ -1355,6 +1355,13 @@ def _scroll_delta(direction: str, amount: int) -> dict[str, int]:
     if direction == "left":
         return {"left": -amount, "top": 0}
     raise ValueError(f"Unsupported scroll direction: {direction}")
+
+
+def _resolve_agent_rotunda_executable(env: dict[str, Any]) -> str:
+    executable_path = env.get("ROTUNDA_EXECUTABLE_PATH")
+    if executable_path:
+        return str(executable_path)
+    return resolve_installed_rotunda_executable()
 
 
 def resolve_installed_rotunda_executable() -> str:

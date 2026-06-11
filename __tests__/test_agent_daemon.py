@@ -190,6 +190,27 @@ async def test_agent_async_daemon_lifecycle_serves_identity_ping_shutdown(tmp_pa
                 await task
 
 
+def test_agent_daemon_executable_resolver_prefers_rotunda_executable_path(monkeypatch) -> None:
+    def fail_installed_resolution() -> str:
+        raise AssertionError("should not resolve installed executable when ROTUNDA_EXECUTABLE_PATH is set")
+
+    monkeypatch.setattr(daemon_module, "resolve_installed_rotunda_executable", fail_installed_resolution)
+
+    assert daemon_module._resolve_agent_rotunda_executable(
+        {"ROTUNDA_EXECUTABLE_PATH": "/tmp/rotunda-bin"}
+    ) == "/tmp/rotunda-bin"
+
+
+def test_agent_daemon_executable_resolver_falls_back_to_installed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        daemon_module,
+        "resolve_installed_rotunda_executable",
+        lambda: "/cache/rotunda-bin",
+    )
+
+    assert daemon_module._resolve_agent_rotunda_executable({}) == "/cache/rotunda-bin"
+
+
 def test_agent_profile_defaults_to_headed(tmp_path, monkeypatch) -> None:
     isolate_agent_store(tmp_path, monkeypatch)
 
