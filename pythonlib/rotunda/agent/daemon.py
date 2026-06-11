@@ -1654,7 +1654,7 @@ def _agent_launch_env(
     *,
     headless: bool,
     source_env: Mapping[str, str] | None = None,
-) -> dict[str, str]:
+) -> dict[str, str | int | float]:
     env = dict(source_env or os.environ)
     if sys.platform == "darwin" and not headless:
         # Read by the Rotunda Cocoa patch to avoid making headed agent windows key/frontmost.
