@@ -39,6 +39,7 @@ dependencies = [
     # does not exist and the bridge exits before reporting an endpoint.
     "playwright>=1.51.0",
     "pydantic>=2,<3",
+    "pydantic-settings>=2,<3",
     "pysocks",
     "pyobjc-framework-Cocoa; sys_platform == 'darwin'",
     "pyyaml",

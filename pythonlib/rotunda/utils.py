@@ -47,6 +47,7 @@ from .geo.geolocation import geoip_allowed, get_geolocation
 from .geo.ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .geo.locales import handle_locale
 from .pkgman import OS_NAME, get_path, installed_verstr, launch_path
+from .settings import ROTUNDA_MACOS_BACKGROUND_WINDOWS, RotundaSettings
 from .virtdisplay import VirtualDisplay
 
 ListOrString: TypeAlias = tuple[str, ...] | list[str] | str
@@ -59,7 +60,7 @@ CACHE_PREFS = {
     "browser.sessionhistory.max_total_viewers": -1,
 }
 
-MACOS_BACKGROUND_WINDOWS_ENV = "ROTUNDA_MACOS_BACKGROUND_WINDOWS"
+MACOS_BACKGROUND_WINDOWS_ENV = ROTUNDA_MACOS_BACKGROUND_WINDOWS
 
 STEALTH_PREFS = {
     # Playwright/Juggler attaches pages as Debugger debuggees. Without this,
@@ -272,7 +273,10 @@ def _should_keep_macos_windows_in_back(options: Mapping[str, Any]) -> bool:
     if sys.platform != "darwin" or options.get("headless") is True:
         return False
     env = options.get("env")
-    return isinstance(env, Mapping) and env.get(MACOS_BACKGROUND_WINDOWS_ENV) == "1"
+    return (
+        isinstance(env, Mapping)
+        and RotundaSettings.from_env(env).macos_background_windows is True
+    )
 
 
 def _ignore_default_arg(options: dict[str, Any], arg: str) -> None:
