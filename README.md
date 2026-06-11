@@ -47,7 +47,6 @@ with sync_playwright() as playwright:
 You can also drive Rotunda directly from the command line with `uvx`, without adding it to a project first. The agent commands keep browser profiles, daemon sessions, and short resource indexes under `~/.rotunda`, so later `uvx rotunda ...` calls can attach to the same profile.
 
 For the daemon, resource-index, heartbeat, and singleton process model behind these commands, see [Agent CLI Architecture](docs/agent-cli-architecture.md).
-For manually launching a browser first and connecting to it from another local process, see [Remote Juggler](docs/remote-juggler.md).
 
 First install the active browser build and create a profile:
 
@@ -112,6 +111,12 @@ Stop the profile daemon when you are done:
 uvx rotunda agent stop 1
 ```
 
+## Additional reading
+
+- [Remote Juggler](docs/remote-juggler.md): launch Rotunda with a fixed Juggler endpoint and connect from another local process.
+- [Live Screencast Stream](docs/live-screencast-stream.md): stream Rotunda browser frames over HLS for QuickTime or VLC.
+- [Agent CLI Architecture](docs/agent-cli-architecture.md): understand the daemon, resource-index, heartbeat, and singleton process model behind `uvx rotunda agent`.
+
 ## On stealth browsing
 
 Web automation is incredible. Unfortunately for us, so many people have abused the automation powers of browsers in the past (ticket scalpers, shoe resellers) that sites have poured billions into detecting anything that's not a human. If you run Chrome over CDP with Playwright you'll know what I'm talking about. You get recaptchas, refusals to login, or subtle changes in behavior.
@@ -162,43 +167,3 @@ You certainly can try! Computer vision isn't a perfect answer here because it's 
 Launching in most cloud VMs to use computer vision also risks leaking state about the underlying host. Most use the same stealth plugins that are pretty easy to detect, which means you're going to eventually get flagged if you use them naturally.
 
 Plus computer vision sometimes makes it hard to click around some websites because direct click events are hard to translate cleanly (see reports of Claude being unable to select dropdowns from form lists).
-
-## Live screencast stream
-
-For a near real-time view of what Rotunda is rendering, use the Juggler screencast streamer. It consumes browser frames directly and serves an HLS stream that QuickTime or VLC can open.
-
-From this repository, launch a stream against the installed Rotunda browser:
-
-```bash
-ROTUNDA_EXE="$(uv run python - <<'PY'
-from rotunda.pkgman import launch_path
-print(launch_path())
-PY
-)"
-
-uv run scripts/stream-juggler-screencast.py \
-  --executable-path "$ROTUNDA_EXE" \
-  --url https://24timezones.com/San-Francisco/time \
-  --port 8899
-```
-
-The script prints a stream URL like:
-
-```text
-http://127.0.0.1:8899/stream.m3u8
-```
-
-Open it in QuickTime with **File -> Open Location...**, paste the URL, and press **Open**. VLC can open the same URL with **File -> Open Network...**. Chrome does not play raw `.m3u8` HLS playlists directly without a web player extension or page, so use QuickTime or VLC for the bare stream URL.
-
-HLS players keep a small playback buffer, so the viewer may trail the browser by roughly a second or two. If the stream looks more delayed than that after restarting the script, close and reopen the stream URL in QuickTime or VLC so the player drops its old buffer.
-
-If you already started Rotunda manually with `--juggler-port 9222`, attach to that browser instead:
-
-```bash
-uv run scripts/stream-juggler-screencast.py \
-  --endpoint http://127.0.0.1:9222 \
-  --url https://24timezones.com/San-Francisco/time \
-  --port 8899
-```
-
-Stop the stream with `Ctrl-C`.
