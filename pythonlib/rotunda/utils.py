@@ -279,10 +279,7 @@ def _ignore_default_arg(options: dict[str, Any], arg: str) -> None:
     ignored = options.get("ignore_default_args")
     if ignored is True:
         return
-    if isinstance(ignored, list | tuple):
-        ignored_args = list(ignored)
-    else:
-        ignored_args = []
+    ignored_args = list(ignored) if isinstance(ignored, list | tuple) else []
     if arg not in ignored_args:
         ignored_args.append(arg)
     options["ignore_default_args"] = ignored_args
