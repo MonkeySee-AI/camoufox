@@ -1,7 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "click>=8.1",
+#   "rotunda",
+# ]
+#
+# [tool.uv.sources]
+# rotunda = { path = "../pythonlib", editable = true }
+# ///
 from __future__ import annotations
 
-import argparse
 import asyncio
 import base64
 import contextlib
@@ -16,8 +25,10 @@ import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import click
 from playwright.async_api import async_playwright
 
 from rotunda import AsyncNewBrowser, async_connect_over_remote_juggler
@@ -265,10 +276,10 @@ def parse_viewport(value: str) -> dict[str, int]:
         width, height = value.lower().split("x", 1)
         return {"width": int(width), "height": int(height)}
     except Exception as exc:
-        raise argparse.ArgumentTypeError("viewport must look like 1280x720") from exc
+        raise click.BadParameter("must look like 1280x720") from exc
 
 
-async def resolve_page(playwright: Any, args: argparse.Namespace) -> tuple[Any, Any | None]:
+async def resolve_page(playwright: Any, args: SimpleNamespace) -> tuple[Any, Any | None]:
     if args.endpoint:
         browser = await async_connect_over_remote_juggler(playwright, args.endpoint)
         if args.new_context or not browser.contexts:
@@ -348,7 +359,7 @@ def format_size(size: dict[str, int]) -> str:
     return f"{size['width']}x{size['height']}"
 
 
-def validate_capture_size(size: dict[str, int], args: argparse.Namespace) -> None:
+def validate_capture_size(size: dict[str, int], args: SimpleNamespace) -> None:
     width = size["width"]
     height = size["height"]
     if width < 10 or width > 10000 or height < 10 or height > 10000:
@@ -360,7 +371,7 @@ def validate_capture_size(size: dict[str, int], args: argparse.Namespace) -> Non
         )
 
 
-async def resolve_capture_size(page: Any, args: argparse.Namespace) -> dict[str, int]:
+async def resolve_capture_size(page: Any, args: SimpleNamespace) -> dict[str, int]:
     if args.capture_size:
         size = args.capture_size
     else:
@@ -397,7 +408,7 @@ async def start_screencast(page: Any, on_frame: Any, quality: int, size: dict[st
         raise
 
 
-async def stream(args: argparse.Namespace) -> None:
+async def stream(args: SimpleNamespace) -> None:
     frame_source = LatestFrame()
     output_tmp: tempfile.TemporaryDirectory[str] | None = None
     output_dir: Path | None = None
@@ -490,50 +501,61 @@ async def stream(args: argparse.Namespace) -> None:
             output_tmp.cleanup()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Stream Rotunda/Juggler screencast frames as HLS or MJPEG."
-    )
-    parser.add_argument("--endpoint", help="Existing remote Juggler HTTP or WebSocket endpoint.")
-    parser.add_argument("--executable-path", help="Rotunda executable to launch when --endpoint is not used.")
-    parser.add_argument("--url", help="Optional URL to open before streaming.")
-    parser.add_argument("--headless", action="store_true", help="Launch headless when not attaching to an endpoint.")
-    parser.add_argument("--debug", action="store_true", help="Enable Rotunda launch debug logging.")
-    parser.add_argument("--new-context", action="store_true", help="Create a new context when attaching to an endpoint.")
-    parser.add_argument("--new-page", action="store_true", help="Create a new page when attaching to an endpoint.")
-    parser.add_argument("--page-index", type=int, default=0, help="Existing page index to stream when attaching.")
-    parser.add_argument("--viewport", type=parse_viewport, default={"width": 1280, "height": 720})
-    parser.add_argument("--capture-size", type=parse_viewport, help="Juggler JPEG frame size. Defaults to the page viewport.")
-    parser.add_argument("--quality", type=int, default=95, help="Juggler JPEG quality, 1-100.")
-    parser.add_argument("--fps", type=int, default=25, help="Output stream FPS.")
-    parser.add_argument("--seed-screenshot", action=argparse.BooleanOptionalAction, default=False, help="Seed the stream with a JPEG screenshot before live frames arrive. Off by default so the stream size is set by the first Juggler frame.")
-    parser.add_argument("--print-frames", type=int, default=0, help="Print every N received Juggler frames.")
-    parser.add_argument("--mode", choices=["hls", "mjpeg"], default="hls")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8899)
-    parser.add_argument("--output-dir", type=Path, help="HLS output directory. Defaults to a temp directory.")
-    parser.add_argument("--ffmpeg", help="Path to ffmpeg. Defaults to PATH lookup.")
-    parser.add_argument("--codec", default="libx264", help="ffmpeg video codec for HLS mode.")
-    parser.add_argument("--crf", type=int, default=18, help="H.264 CRF quality for HLS mode. Lower is better; 18 is visually high quality.")
-    parser.add_argument("--hls-time", type=float, default=0.6, help="HLS segment length in seconds. Lower reduces latency.")
-    parser.add_argument("--hls-list-size", type=int, default=2, help="Number of HLS segments advertised in the live playlist.")
-    parser.add_argument("--ffmpeg-loglevel", default="warning")
-    return parser
+def _viewport_callback(
+    _ctx: click.Context,
+    _param: click.Parameter,
+    value: str | None,
+) -> dict[str, int] | None:
+    if value is None:
+        return None
+    return parse_viewport(value)
 
 
-def main() -> None:
-    args = build_parser().parse_args()
-    if not 1 <= args.fps <= 60:
-        raise SystemExit("--fps must be between 1 and 60")
-    if not 1 <= args.quality <= 100:
-        raise SystemExit("--quality must be between 1 and 100")
-    if not 0 <= args.crf <= 51:
-        raise SystemExit("--crf must be between 0 and 51")
-    if args.hls_time < 0.6:
-        raise SystemExit("--hls-time must be at least 0.6 for broadly compatible HLS playlists")
-    if args.hls_list_size < 1:
-        raise SystemExit("--hls-list-size must be at least 1")
-    asyncio.run(stream(args))
+def _validate_range(param_hint: str, value: int | float, lower: int | float, upper: int | float) -> None:
+    if not lower <= value <= upper:
+        raise click.BadParameter(f"must be between {lower} and {upper}", param_hint=param_hint)
+
+
+@click.command(
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Stream Rotunda/Juggler screencast frames as HLS or MJPEG.",
+)
+@click.option("--endpoint", help="Existing remote Juggler HTTP or WebSocket endpoint.")
+@click.option("--executable-path", help="Rotunda executable to launch when --endpoint is not used.")
+@click.option("--url", help="Optional URL to open before streaming.")
+@click.option("--headless", is_flag=True, help="Launch headless when not attaching to an endpoint.")
+@click.option("--debug", is_flag=True, help="Enable Rotunda launch debug logging.")
+@click.option("--new-context", is_flag=True, help="Create a new context when attaching to an endpoint.")
+@click.option("--new-page", is_flag=True, help="Create a new page when attaching to an endpoint.")
+@click.option("--page-index", type=int, default=0, show_default=True, help="Existing page index to stream when attaching.")
+@click.option("--viewport", default="1280x720", show_default=True, callback=_viewport_callback, help="Browser viewport, formatted as WIDTHxHEIGHT.")
+@click.option("--capture-size", callback=_viewport_callback, help="Juggler JPEG frame size. Defaults to the page viewport.")
+@click.option("--quality", type=int, default=95, show_default=True, help="Juggler JPEG quality, 1-100.")
+@click.option("--fps", type=int, default=25, show_default=True, help="Output stream FPS.")
+@click.option("--seed-screenshot/--no-seed-screenshot", default=False, show_default=True, help="Seed the stream with a JPEG screenshot before live frames arrive. Off by default so the stream size is set by the first Juggler frame.")
+@click.option("--print-frames", type=int, default=0, show_default=True, help="Print every N received Juggler frames.")
+@click.option("--mode", type=click.Choice(["hls", "mjpeg"]), default="hls", show_default=True)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", type=int, default=8899, show_default=True)
+@click.option("--output-dir", type=click.Path(file_okay=False, dir_okay=True, path_type=Path), help="HLS output directory. Defaults to a temp directory.")
+@click.option("--ffmpeg", help="Path to ffmpeg. Defaults to PATH lookup.")
+@click.option("--codec", default="libx264", show_default=True, help="ffmpeg video codec for HLS mode.")
+@click.option("--crf", type=int, default=18, show_default=True, help="H.264 CRF quality for HLS mode. Lower is better; 18 is visually high quality.")
+@click.option("--hls-time", type=float, default=0.6, show_default=True, help="HLS segment length in seconds. Lower reduces latency.")
+@click.option("--hls-list-size", type=int, default=2, show_default=True, help="Number of HLS segments advertised in the live playlist.")
+@click.option("--ffmpeg-loglevel", default="warning", show_default=True)
+def main(**kwargs: Any) -> None:
+    _validate_range("--fps", kwargs["fps"], 1, 60)
+    _validate_range("--quality", kwargs["quality"], 1, 100)
+    _validate_range("--crf", kwargs["crf"], 0, 51)
+    if kwargs["hls_time"] < 0.6:
+        raise click.BadParameter(
+            "must be at least 0.6 for broadly compatible HLS playlists",
+            param_hint="--hls-time",
+        )
+    if kwargs["hls_list_size"] < 1:
+        raise click.BadParameter("must be at least 1", param_hint="--hls-list-size")
+    asyncio.run(stream(SimpleNamespace(**kwargs)))
 
 
 if __name__ == "__main__":
