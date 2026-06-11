@@ -906,6 +906,42 @@ def test_persistent_context_options_respects_explicit_viewport(
     assert context_options["viewport"] == {"width": 320, "height": 240}
 
 
+def test_persistent_context_options_drops_macos_foreground_for_background_windows(
+    modules: tuple[Any, Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    monkeypatch.setattr(utils.sys, "platform", "darwin")
+
+    context_options = utils.persistent_context_options(
+        {
+            "args": [],
+            "env": {utils.MACOS_BACKGROUND_WINDOWS_ENV: "1"},
+            "headless": False,
+        }
+    )
+
+    assert context_options["ignore_default_args"] == ["-foreground"]
+
+
+def test_persistent_context_options_keeps_macos_foreground_for_normal_launches(
+    modules: tuple[Any, Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    monkeypatch.setattr(utils.sys, "platform", "darwin")
+
+    context_options = utils.persistent_context_options(
+        {
+            "args": [],
+            "env": {"TEST_ENV": "1"},
+            "headless": False,
+        }
+    )
+
+    assert "ignore_default_args" not in context_options
+
+
 def test_launch_options_applies_navigator_tracking_signal_prefs(
     modules: tuple[Any, Any, Any],
     fake_fingerprint: FakeFingerprint,

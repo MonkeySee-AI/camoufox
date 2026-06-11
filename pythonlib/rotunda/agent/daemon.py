@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -15,7 +16,7 @@ from urllib.parse import urlsplit
 import rich_click as click
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
-from ..settings import RotundaSettings
+from ..settings import ROTUNDA_MACOS_BACKGROUND_WINDOWS, RotundaSettings
 from .dom import DomDiff, render_action_change
 from .dom_serializer import DOMSerializer, DOMSnapshot
 from .runtime import (
@@ -29,6 +30,7 @@ from .runtime import (
 from .store import AgentStore
 
 AGENT_REQUEST_TIMEOUT_SECONDS = 70.0
+MACOS_BACKGROUND_WINDOWS_ENV = ROTUNDA_MACOS_BACKGROUND_WINDOWS
 AGENT_ROUTE_TIMEOUT_SECONDS = {
     "/back": 70.0,
     "/check": 25.0,
@@ -674,7 +676,7 @@ class AgentDaemon:
             user_data_dir.mkdir(parents=True, exist_ok=True)
             headless = bool(self.profile.get("headless", False))
             humanize = bool(self.profile.get("humanize", True))
-            env: dict[str, str | int | float] = dict(os.environ)
+            env = _agent_launch_env(headless=headless)
             executable_path = _resolve_agent_rotunda_executable(env)
 
             self.playwright = await async_playwright().start()
@@ -1654,6 +1656,18 @@ def hide_macos_dock_icon() -> None:
             byref(current_process),
             transform_to_background_application,
         )
+
+
+def _agent_launch_env(
+    *,
+    headless: bool,
+    source_env: Mapping[str, str] | None = None,
+) -> dict[str, str | int | float]:
+    env = dict(source_env or os.environ)
+    if sys.platform == "darwin" and not headless:
+        # Read by the Rotunda Cocoa patch to avoid making headed agent windows key/frontmost.
+        env.setdefault(MACOS_BACKGROUND_WINDOWS_ENV, "1")
+    return env
 
 
 def _wait_until(value: str) -> Literal["commit", "domcontentloaded", "load", "networkidle"]:

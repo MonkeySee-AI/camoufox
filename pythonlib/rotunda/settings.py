@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROTUNDA_EXECUTABLE_PATH = "ROTUNDA_EXECUTABLE_PATH"
 ROTUNDA_CONFIG_PATH = "ROTUNDA_CONFIG_PATH"
+ROTUNDA_MACOS_BACKGROUND_WINDOWS = "ROTUNDA_MACOS_BACKGROUND_WINDOWS"
 
 ROTUNDA_DEBUG_DUMP = "ROTUNDA_DEBUG_DUMP"
 ROTUNDA_DEBUG_DUMP_DIR = "ROTUNDA_DEBUG_DUMP_DIR"
@@ -53,11 +54,13 @@ VM_ACCESS_ENV_VAR_NAMES = (
 )
 SUPPORTED_ENV_VAR_NAMES = (
     ROTUNDA_EXECUTABLE_PATH,
+    ROTUNDA_MACOS_BACKGROUND_WINDOWS,
     *DEBUG_DUMP_ENV_VAR_NAMES,
     *VM_ACCESS_ENV_VAR_NAMES,
 )
 LAUNCH_MANIFEST_ENV_VAR_NAMES = (
     ROTUNDA_CONFIG_PATH,
+    ROTUNDA_MACOS_BACKGROUND_WINDOWS,
     *DEBUG_DUMP_ENV_VAR_NAMES,
     *VM_ACCESS_ENV_VAR_NAMES,
 )
@@ -73,6 +76,10 @@ class RotundaSettings(BaseSettings):
     executable_path: str | None = Field(
         default=None,
         validation_alias=ROTUNDA_EXECUTABLE_PATH,
+    )
+    macos_background_windows: bool | None = Field(
+        default=None,
+        validation_alias=ROTUNDA_MACOS_BACKGROUND_WINDOWS,
     )
     debug_dump: str | None = Field(
         default=None,
@@ -164,6 +171,7 @@ class RotundaSettings(BaseSettings):
 
     @field_validator(
         "vm_access_log",
+        "macos_background_windows",
         "vm_access_buffered",
         "vm_access_realm",
         "vm_access_symbols",

@@ -7,6 +7,7 @@ from rotunda.settings import (
     ROTUNDA_DEBUG_DUMP_MAX_BODY,
     ROTUNDA_DEBUG_DUMP_RAW,
     ROTUNDA_EXECUTABLE_PATH,
+    ROTUNDA_MACOS_BACKGROUND_WINDOWS,
     ROTUNDA_VM_ACCESS_FUNCTION_NAMES,
     ROTUNDA_VM_ACCESS_LOG,
     ROTUNDA_VM_ACCESS_LOG_FILE,
@@ -24,6 +25,7 @@ def test_settings_parses_supported_rotunda_env_overrides() -> None:
     settings = RotundaSettings.from_env(
         {
             ROTUNDA_EXECUTABLE_PATH: "/tmp/rotunda-bin",
+            ROTUNDA_MACOS_BACKGROUND_WINDOWS: "true",
             ROTUNDA_DEBUG_DUMP: "manifest,vm",
             ROTUNDA_DEBUG_DUMP_DIR: "/tmp/rotunda-debug",
             ROTUNDA_DEBUG_DUMP_MAX_BODY: "1024",
@@ -41,6 +43,7 @@ def test_settings_parses_supported_rotunda_env_overrides() -> None:
     )
 
     assert settings.executable_path == "/tmp/rotunda-bin"
+    assert settings.macos_background_windows is True
     assert settings.debug_dump == "manifest,vm"
     assert settings.debug_dump_dir == "/tmp/rotunda-debug"
     assert settings.debug_dump_max_body == 1024
