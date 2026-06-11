@@ -1,0 +1,57 @@
+diff --git a/widget/cocoa/nsCocoaWindow.mm b/widget/cocoa/nsCocoaWindow.mm
+--- a/widget/cocoa/nsCocoaWindow.mm
++++ b/widget/cocoa/nsCocoaWindow.mm
+@@ -62,6 +62,7 @@
+ #include "VibrancyManager.h"
+ #include "nsPresContext.h"
+ #include "nsDocShell.h"
++#include "prenv.h"
+ 
+ #include "gfxPlatform.h"
+ #include "qcms.h"
+@@ -96,6 +97,11 @@ extern BOOL gSomeMenuBarPainted;
+ static uint32_t sModalWindowCount = 0;
+ 
+ LazyLogModule sCocoaLog("nsCocoaWidgets");
++
++static bool RotundaShouldKeepWindowsInBack() {
++  const char* value = PR_GetEnv("ROTUNDA_MACOS_BACKGROUND_WINDOWS");
++  return value && value[0] == '1';
++}
+ 
+ extern "C" {
+ // CGSPrivate.h
+@@ -5284,11 +5290,15 @@ void nsCocoaWindow::Show(bool aState) {
+       }
+ 
+       // We don't want most alwaysontop / alert windows to pull focus when
+       // they're opened, as these tend to be for peripheral indicators and
+       // displays.
+-      if ((mAlwaysOnTop && mPiPType != PiPType::DocumentPiP) || mIsAlert) {
++      if (RotundaShouldKeepWindowsInBack()) {
++        mWindow.contentView.needsDisplay = YES;
++        [mWindow orderBack:nil];
++      } else if ((mAlwaysOnTop && mPiPType != PiPType::DocumentPiP) ||
++                 mIsAlert) {
+         [mWindow orderFront:nil];
+       } else {
+         [mWindow makeKeyAndOrderFront:nil];
+       }
+       NS_OBJC_END_TRY_IGNORE_BLOCK;
+@@ -6660,11 +6669,15 @@ void nsCocoaWindow::SetFocus(Raise aRaise,
+   if (!mWindow) return;
+ 
+   if (aRaise == Raise::Yes && (mWindow.isVisible || mWindow.isMiniaturized)) {
+     if (mWindow.isMiniaturized) {
+       [mWindow deminiaturize:nil];
+     }
+-    [mWindow makeKeyAndOrderFront:nil];
++    if (RotundaShouldKeepWindowsInBack()) {
++      [mWindow orderBack:nil];
++    } else {
++      [mWindow makeKeyAndOrderFront:nil];
++    }
+   }
+ }
+ 
+ LayoutDeviceIntPoint nsCocoaWindow::WidgetToScreenOffset() {

@@ -199,6 +199,37 @@ def test_agent_profile_defaults_to_headed(tmp_path, monkeypatch) -> None:
     assert profile["humanize"] is True
 
 
+def test_agent_launch_env_keeps_headed_macos_windows_in_back(monkeypatch) -> None:
+    monkeypatch.setattr(daemon_module.sys, "platform", "darwin")
+
+    env = daemon_module._agent_launch_env(headless=False, source_env={"PATH": "/bin"})
+
+    assert env["PATH"] == "/bin"
+    assert env[daemon_module.MACOS_BACKGROUND_WINDOWS_ENV] == "1"
+
+
+def test_agent_launch_env_respects_macos_background_window_override(monkeypatch) -> None:
+    monkeypatch.setattr(daemon_module.sys, "platform", "darwin")
+
+    env = daemon_module._agent_launch_env(
+        headless=False,
+        source_env={daemon_module.MACOS_BACKGROUND_WINDOWS_ENV: "0"},
+    )
+
+    assert env[daemon_module.MACOS_BACKGROUND_WINDOWS_ENV] == "0"
+
+
+def test_agent_launch_env_does_not_background_headless_or_non_macos(monkeypatch) -> None:
+    monkeypatch.setattr(daemon_module.sys, "platform", "darwin")
+    mac_headless = daemon_module._agent_launch_env(headless=True, source_env={})
+
+    monkeypatch.setattr(daemon_module.sys, "platform", "linux")
+    linux_headed = daemon_module._agent_launch_env(headless=False, source_env={})
+
+    assert daemon_module.MACOS_BACKGROUND_WINDOWS_ENV not in mac_headless
+    assert daemon_module.MACOS_BACKGROUND_WINDOWS_ENV not in linux_headed
+
+
 def test_agent_store_resolves_profile_by_name(tmp_path, monkeypatch) -> None:
     isolate_agent_store(tmp_path, monkeypatch)
     store = AgentStore()

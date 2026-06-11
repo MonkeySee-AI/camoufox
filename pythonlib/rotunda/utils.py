@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import json
 import os
+import sys
 import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -57,6 +58,8 @@ CACHE_PREFS = {
     "browser.sessionhistory.max_entries": 10,
     "browser.sessionhistory.max_total_viewers": -1,
 }
+
+MACOS_BACKGROUND_WINDOWS_ENV = "ROTUNDA_MACOS_BACKGROUND_WINDOWS"
 
 STEALTH_PREFS = {
     # Playwright/Juggler attaches pages as Debugger debuggees. Without this,
@@ -250,15 +253,36 @@ def persistent_context_options(options: Mapping[str, Any]) -> dict[str, Any]:
     accept context-only keys such as `viewport`. Persistent contexts do accept
     those keys, and Linux headless layout uses that viewport instead of Firefox
     process window flags.
+
+    On macOS, we only suppress Playwright's default `-foreground` argument when
+    the launch env explicitly opts into Rotunda background windows. Normal headed
+    persistent-context launches keep the platform default of becoming frontmost.
     """
     result = dict(options)
-    if "viewport" in result or result.get("no_viewport") is True:
-        return result
-
-    viewport = _viewport_from_launch_options(result)
-    if viewport is not None:
-        result["viewport"] = viewport
+    if "viewport" not in result and result.get("no_viewport") is not True:
+        viewport = _viewport_from_launch_options(result)
+        if viewport is not None:
+            result["viewport"] = viewport
+    if _should_keep_macos_windows_in_back(result):
+        _ignore_default_arg(result, "-foreground")
     return result
+
+
+def _should_keep_macos_windows_in_back(options: Mapping[str, Any]) -> bool:
+    if sys.platform != "darwin" or options.get("headless") is True:
+        return False
+    env = options.get("env")
+    return isinstance(env, Mapping) and env.get(MACOS_BACKGROUND_WINDOWS_ENV) == "1"
+
+
+def _ignore_default_arg(options: dict[str, Any], arg: str) -> None:
+    ignored = options.get("ignore_default_args")
+    if ignored is True:
+        return
+    ignored_args = list(ignored) if isinstance(ignored, list | tuple) else []
+    if arg not in ignored_args:
+        ignored_args.append(arg)
+    options["ignore_default_args"] = ignored_args
 
 
 async def async_attach_vd(
