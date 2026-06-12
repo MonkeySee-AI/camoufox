@@ -41,7 +41,7 @@ uvx rotunda fetch
 The agent CLI is intentionally split across short shell commands:
 
 - Profiles are durable browser identities stored under `~/.rotunda`.
-- Contexts wrap one or more pages that share the same browser identity profile.
+- Contexts wrap multiple pages that share the same browser identity profile.
 - A context starts or attaches to a local Rotunda daemon for that profile.
 - Pages are numbered resources printed by the CLI, such as `[3] page ...`.
 - `describe` prints an agent-friendly DOM and registers element refs.
@@ -51,15 +51,15 @@ Resource indexes are local shortcuts. The page number in examples is only illust
 
 ## Standard Workflow
 
-Check for an existing profile before creating a new one:
+The first step of a browsing task is to check whether there is already a local profile that can be used for the task:
 
 ```bash
 uvx rotunda agent resources --kind profile
 ```
 
-Prefer reusing an existing profile that fits the task, especially for the same site, account, or user workflow. Old profiles preserve cookies, local storage, and browser history, which makes browsing more human and avoids unnecessary identity churn.
+Prefer using old profiles over creating new ones. Reuse an existing profile when it fits the same site, account, user, or general browsing purpose. Old profiles preserve cookies, local storage, browser history, and trust signals, which makes browsing more human and avoids unnecessary identity churn.
 
-Create a new profile only when no suitable profile exists, when the user wants a clean browser identity, or when the current profile is repeatedly blocked by captchas or site trust checks:
+Create a new profile only when no suitable profile exists, when the user wants a clean browser identity, or when a site is blocking the current profile with repeated captchas or trust checks. Captchas on an otherwise valid workflow are a good signal to generate a new profile:
 
 ```bash
 uvx rotunda agent new-profile --name task-name
@@ -92,9 +92,11 @@ uvx rotunda agent type <input-ref> "more text"
 uvx rotunda agent press <input-ref> Enter
 ```
 
-Element refs usually remain callable while the underlying DOM element remains on the page. Do not run `describe` after every small action by default. When filling a stable form, agents can often complete several fields with a sequence of `fill`, `type`, `select`, and `press` commands before describing again.
+Element refs, including input refs, should stay the same and remain callable as long as the underlying DOM element stays on the page. Do not run `describe` after every small action by default.
 
-Run `describe` again after navigation, major same-page UI changes, element additions or deletions, or when an action reports an unexpected result. Dynamic pages may need more frequent `describe` calls; stable pages usually do not.
+Use conditional judgment. When filling out a stable form, agents can often complete it in one sequence of `fill`, `type`, `select`, and `press` commands before describing again. When interacting with a very dynamic page, agents may need more frequent `describe` calls.
+
+Run `describe` again when the page navigates, when elements are deleted, when new elements are added, when a major same-page UI change happens, or when an action reports an unexpected result. These are the main cases where a ref can become stale or where the agent needs a fresh DOM view.
 
 Stop the daemon when the task is finished:
 
@@ -283,7 +285,7 @@ uvx rotunda agent new-context <profile>
 uvx rotunda agent pages
 ```
 
-If a site flags the browser, compare the same page in your normal browser. If other browsers work and the issue appears Rotunda-specific, ask the user whether they want help filing an issue. Do not file an issue or share debug material without user approval. If the user approves, capture the debug dump described in the Rotunda README and review it for private data before sharing.
+If a site flags the browser, compare the same page in your normal browser. If other browsers work and the issue appears Rotunda-specific, always ask the user whether they want help filing an issue. Never file an issue or share debug material without explicit user approval. If the user approves, capture the debug dump described in the Rotunda README and review it for private data before sharing.
 
 ## Python API Escape Hatch
 
