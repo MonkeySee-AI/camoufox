@@ -41,7 +41,8 @@ uvx rotunda fetch
 The agent CLI is intentionally split across short shell commands:
 
 - Profiles are durable browser identities stored under `~/.rotunda`.
-- A context starts or attaches to a local Rotunda daemon for one profile.
+- Contexts wrap one or more pages that share the same browser identity profile.
+- A context starts or attaches to a local Rotunda daemon for that profile.
 - Pages are numbered resources printed by the CLI, such as `[3] page ...`.
 - `describe` prints an agent-friendly DOM and registers element refs.
 - Actions use the refs from the most recent `describe` for that page.
@@ -50,7 +51,15 @@ Resource indexes are local shortcuts. The page number in examples is only illust
 
 ## Standard Workflow
 
-Create a profile once:
+Check for an existing profile before creating a new one:
+
+```bash
+uvx rotunda agent resources --kind profile
+```
+
+Prefer reusing an existing profile that fits the task, especially for the same site, account, or user workflow. Old profiles preserve cookies, local storage, and browser history, which makes browsing more human and avoids unnecessary identity churn.
+
+Create a new profile only when no suitable profile exists, when the user wants a clean browser identity, or when the current profile is repeatedly blocked by captchas or site trust checks:
 
 ```bash
 uvx rotunda agent new-profile --name task-name
@@ -83,7 +92,9 @@ uvx rotunda agent type <input-ref> "more text"
 uvx rotunda agent press <input-ref> Enter
 ```
 
-After any action that changes the page, run `describe` again before choosing the next element. Element refs are scoped to the latest description of the page and can go stale after navigation, DOM updates, or another `describe`.
+Element refs usually remain callable while the underlying DOM element remains on the page. Do not run `describe` after every small action by default. When filling a stable form, agents can often complete several fields with a sequence of `fill`, `type`, `select`, and `press` commands before describing again.
+
+Run `describe` again after navigation, major same-page UI changes, element additions or deletions, or when an action reports an unexpected result. Dynamic pages may need more frequent `describe` calls; stable pages usually do not.
 
 Stop the daemon when the task is finished:
 
@@ -272,7 +283,7 @@ uvx rotunda agent new-context <profile>
 uvx rotunda agent pages
 ```
 
-If a site flags the browser, compare the same page in your normal browser. If other browsers work and the issue appears Rotunda-specific, capture the debug dump described in the Rotunda README before filing an issue.
+If a site flags the browser, compare the same page in your normal browser. If other browsers work and the issue appears Rotunda-specific, ask the user whether they want help filing an issue. Do not file an issue or share debug material without user approval. If the user approves, capture the debug dump described in the Rotunda README and review it for private data before sharing.
 
 ## Python API Escape Hatch
 

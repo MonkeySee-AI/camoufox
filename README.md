@@ -49,6 +49,8 @@ You can also drive Rotunda directly from the command line with `uvx`, without ad
 For the daemon, resource-index, heartbeat, and singleton process model behind these commands, see [Agent CLI Architecture](docs/agent-cli-architecture.md).
 For manually launching a browser first and connecting to it from another local process, see [Remote Juggler](docs/remote-juggler.md).
 
+For agent clients that support installable skills, see the [Rotunda skill](skills/rotunda/SKILL.md) for a compact operating guide.
+
 First install the active browser build and create a profile:
 
 ```bash
