@@ -48,6 +48,8 @@ You can also drive Rotunda directly from the command line with `uvx`, without ad
 
 For the daemon, resource-index, heartbeat, and singleton process model behind these commands, see [Agent CLI Architecture](docs/agent-cli-architecture.md).
 
+For agent clients that support installable skills, see the [Rotunda skill](skills/rotunda/SKILL.md) for a compact operating guide.
+
 First install the active browser build and create a profile:
 
 ```bash
@@ -145,6 +147,22 @@ zip -r rotunda-fingerprint-debug.zip "$ROTUNDA_DEBUG_DUMP_DIR"
 ```
 
 Attach `rotunda-fingerprint-debug.zip` to a GitHub Issue with the site URL, what you expected to happen, and what the site reported instead. The dump includes request/response bodies, so review it before sharing and do not set `ROTUNDA_DEBUG_DUMP_RAW=1` unless a maintainer asks for it.
+
+## Agent Skill
+
+Rotunda includes an installable skill for agents that support the `skills` CLI. Install it into your current project with:
+
+```bash
+npx skills add MonkeySee-AI/rotunda --skill rotunda
+```
+
+To install it for all supported local agents without prompts, use:
+
+```bash
+npx skills add MonkeySee-AI/rotunda --skill rotunda --agent '*' -y
+```
+
+The skill lives at [skills/rotunda/SKILL.md](skills/rotunda/SKILL.md) and gives agents a compact operating guide for `uvx rotunda agent ...` browser workflows.
 
 ## Want to help?
 
