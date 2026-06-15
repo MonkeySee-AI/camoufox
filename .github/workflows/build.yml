@@ -508,7 +508,7 @@ jobs:
           uv run scripts/resolve_playwright_versions.py \
             --package playwright \
             --limit 10 \
-            --minimum-version 1.51.0 \
+            --dependency-file pythonlib/pyproject.toml \
             --github-output "$GITHUB_OUTPUT"
 
   remote-juggler-playwright-compat:

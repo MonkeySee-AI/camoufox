@@ -1,0 +1,139 @@
+name: Auto Playwright Compatibility Bump
+
+on:
+  schedule:
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoplaywright
+  cancel-in-progress: false
+
+jobs:
+  open-compatibility-pr:
+    name: Open Playwright compatibility PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Require automation token
+        env:
+          AUTOPLAYWRIGHT_TOKEN: ${{ secrets.AUTOPLAYWRIGHT_TOKEN }}
+        run: |
+          if [ -z "$AUTOPLAYWRIGHT_TOKEN" ]; then
+            echo "::error::AUTOPLAYWRIGHT_TOKEN is required. Use a PAT or GitHub App token so the opened PR triggers normal pull_request CI."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AUTOPLAYWRIGHT_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            pythonlib/pyproject.toml
+            ml-models/pyproject.toml
+            __tests__/pyproject.toml
+            uv.lock
+
+      - name: Update Playwright max version
+        id: update
+        run: |
+          uv run .github/scripts/update-playwright-max-version.py \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Report current Playwright max
+        if: ${{ steps.update.outputs.update_needed != 'true' }}
+        run: |
+          echo "Rotunda already supports Playwright ${{ steps.update.outputs.current_max_version }}; latest stable is ${{ steps.update.outputs.latest_version }}."
+
+      - name: Check for existing Playwright PR
+        if: ${{ steps.update.outputs.update_needed == 'true' }}
+        id: existing-pr
+        env:
+          GH_TOKEN: ${{ secrets.AUTOPLAYWRIGHT_TOKEN }}
+          PR_TITLE: ${{ steps.update.outputs.pr_title }}
+        run: |
+          gh pr list --state open --limit 100 --json title > open-prs.json
+          existing_count="$(python3 - <<'PY'
+          import json
+          import os
+
+          with open("open-prs.json", encoding="utf-8") as handle:
+              prs = json.load(handle)
+          print(sum(1 for pr in prs if pr.get("title") == os.environ["PR_TITLE"]))
+          PY
+          )"
+          if [ "$existing_count" -gt 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Open PR already exists with title: $PR_TITLE"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update lockfile
+        if: ${{ steps.update.outputs.update_needed == 'true' && steps.existing-pr.outputs.exists != 'true' }}
+        run: uv lock --upgrade-package playwright
+
+      - name: Check dependency changes
+        if: ${{ steps.update.outputs.update_needed == 'true' && steps.existing-pr.outputs.exists != 'true' }}
+        id: changes
+        run: |
+          if git diff --quiet -- pythonlib/pyproject.toml uv.lock; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No dependency changes were produced."
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push branch
+        if: ${{ steps.changes.outputs.has_changes == 'true' }}
+        env:
+          BRANCH_NAME: ${{ steps.update.outputs.branch_name }}
+          PR_TITLE: ${{ steps.update.outputs.pr_title }}
+        run: |
+          git config user.name "rotunda-autoplaywright[bot]"
+          git config user.email "rotunda-autoplaywright[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH_NAME"
+          git add pythonlib/pyproject.toml uv.lock
+          git commit -m "$PR_TITLE"
+          git fetch origin "refs/heads/$BRANCH_NAME:refs/remotes/origin/$BRANCH_NAME" || true
+          git push --force-with-lease origin "$BRANCH_NAME"
+
+      - name: Open pull request
+        if: ${{ steps.changes.outputs.has_changes == 'true' }}
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ secrets.AUTOPLAYWRIGHT_TOKEN }}
+          BRANCH_NAME: ${{ steps.update.outputs.branch_name }}
+          CURRENT_MAX_VERSION: ${{ steps.update.outputs.current_max_version }}
+          LATEST_VERSION: ${{ steps.update.outputs.latest_version }}
+          PR_TITLE: ${{ steps.update.outputs.pr_title }}
+        run: |
+          body_file="$(mktemp)"
+          {
+            echo "Bumps the validated Playwright upper bound from ${CURRENT_MAX_VERSION} to ${LATEST_VERSION}."
+            echo
+            echo "The full-build label is applied so normal build and compatibility CI can validate the new Playwright release before merge."
+          } > "$body_file"
+
+          gh pr create \
+            --base "$DEFAULT_BRANCH" \
+            --head "$BRANCH_NAME" \
+            --title "$PR_TITLE" \
+            --body-file "$body_file" \
+            --label full-build
