@@ -23,5 +23,10 @@ counterpart for the implementation file under test, for example
 `playwright_driver_hooks.py` -> `test_playwright_driver_hooks.py`. Integration
 tests may be named around the workflow or behavior they cover.
 
+In test files, add a one- or two-line narrative comment before large setup,
+script, fixture, or assertion blocks. The comment should explain what behavior
+the block is proving or why the setup exists, without repeating the mechanics of
+the code.
+
 Do not treat broad mock-based plumbing tests as proof of a user-visible,
 browser-visible, privacy, isolation, security, or stealth property.

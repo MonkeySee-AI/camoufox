@@ -10,6 +10,7 @@ import pytest
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
+from __tests__.fixtures import get_fixtures_path
 from rotunda.assets import get_asset_by_name
 from rotunda.playwright_driver_hooks import registered_playwright_driver_hooks
 from rotunda.utility_eval import (
@@ -17,10 +18,8 @@ from rotunda.utility_eval import (
     install_utility_eval_driver_patch,
 )
 
-_TEST_ROOT = Path(__file__).resolve().parent
-_INSTRUMENTED_DOM_READS_HTML = (
-    _TEST_ROOT / "fixtures" / "html" / "instrumented_dom_reads.html"
-)
+_INSTRUMENTED_DOM_READS_HTML = get_fixtures_path("html/instrumented_dom_reads.html")
+_DOM_READ_EVAL = get_fixtures_path("js/dom_read_eval.js").read_text()
 
 
 class FakeChannel:
@@ -46,23 +45,6 @@ class FakePageImpl:
 class FakeAsyncPage:
     def __init__(self, frame: FakeFrame) -> None:
         self._impl_obj = FakePageImpl(frame)
-
-_DOM_READ_EVAL = """
-() => {
-  const root = document.querySelector("[data-root]");
-  const allItems = document.querySelectorAll(".item");
-  const target = document.querySelector("#target");
-  const style = window.getComputedStyle(target);
-  const rect = target.getBoundingClientRect();
-  return {
-    itemCount: allItems.length,
-    id: target.getAttribute("id"),
-    closestRoot: target.closest("[data-root]") === root,
-    display: style.display,
-    width: rect.width,
-  };
-}
-"""
 
 
 def _read_counters(page: Any) -> dict[str, int]:
@@ -94,6 +76,8 @@ def test_playwright_utility_eval_patch_adds_dispatcher_methods_and_schema() -> N
     driver_lib = (
         Path(playwright.__file__).resolve().parent / "driver" / "package" / "lib"
     )
+    # This is a version-drift sentinel for the private Playwright modules our
+    # preload patches; behavioral isolation is covered by the browser test below.
     script = f"""
 const base = {str(driver_lib)!r};
 require(base + "/protocol/validator.js");
@@ -140,6 +124,8 @@ def test_isolated_eval_does_not_trip_page_shadowed_dom_reads(
             page = browser.new_page()
             page.goto(_INSTRUMENTED_DOM_READS_HTML.as_uri(), wait_until="load")
 
+            # The fixture counts page-visible DOM reads. Main-world eval should
+            # trip those counters, while isolated eval should not.
             page.evaluate("() => window.__resetRotundaReadCounters()")
             main_world_result = page.evaluate(_DOM_READ_EVAL)
             main_world_counters = _read_counters(page)

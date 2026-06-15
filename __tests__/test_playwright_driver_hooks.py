@@ -16,6 +16,8 @@ def test_driver_hook_registry_installs_hooks_registered_after_install(
     hook_path = tmp_path / "extra-driver-hook.js"
     hook_path.write_text('"use strict";\n')
 
+    # Hooks may be registered after the env wrapper is installed; future driver
+    # subprocesses still need to see the updated registry.
     registered = register_playwright_driver_hook("test-extra-hook", hook_path)
     installed = install_playwright_driver_hooks()
 
