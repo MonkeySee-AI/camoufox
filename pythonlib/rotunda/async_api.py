@@ -17,6 +17,7 @@ from rotunda.virtdisplay import VirtualDisplay
 
 from . import remote_juggler as _remote_juggler
 from .debug_dump import attach_debug_metadata, install_async_context_debug_dump
+from .driver_hooks import install_playwright_driver_hooks
 from .fingerprints import _derive_browser_major_version, generate_context_fingerprint
 from .utils import async_attach_vd, launch_options, persistent_context_options
 
@@ -36,6 +37,7 @@ class AsyncRotunda(PlaywrightContextManager):
         self.browser: Browser | BrowserContext | None = None
 
     async def __aenter__(self) -> Any:
+        install_playwright_driver_hooks()
         _playwright = await super().__aenter__()
         self.browser = await AsyncNewBrowser(_playwright, **self.launch_options)
         return self.browser

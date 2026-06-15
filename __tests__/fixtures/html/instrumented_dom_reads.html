@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <script>
+    (() => {
+      const counts = Object.create(null);
+      const count = name => counts[name] = (counts[name] || 0) + 1;
+      const wrap = (owner, name, label) => {
+        const original = owner[name];
+        Object.defineProperty(owner, name, {
+          configurable: true,
+          writable: true,
+          value: function(...args) {
+            count(label);
+            return original.apply(this, args);
+          },
+        });
+      };
+      Object.defineProperty(window, "__rotundaReadCounters", { value: counts });
+      Object.defineProperty(window, "__resetRotundaReadCounters", {
+        value: () => {
+          for (const key of Object.keys(counts))
+            delete counts[key];
+        },
+      });
+      wrap(Document.prototype, "querySelector", "Document.querySelector");
+      wrap(Document.prototype, "querySelectorAll", "Document.querySelectorAll");
+      wrap(Element.prototype, "getAttribute", "Element.getAttribute");
+      wrap(Element.prototype, "getBoundingClientRect", "Element.getBoundingClientRect");
+      wrap(Element.prototype, "closest", "Element.closest");
+      const originalGetComputedStyle = window.getComputedStyle;
+      Object.defineProperty(window, "getComputedStyle", {
+        configurable: true,
+        writable: true,
+        value: function(...args) {
+          count("window.getComputedStyle");
+          return originalGetComputedStyle.apply(this, args);
+        },
+      });
+    })();
+  </script>
+</head>
+<body>
+  <main data-root>
+    <div id="target" class="item" data-name="target" style="width: 17px">hello</div>
+    <div class="item">world</div>
+  </main>
+</body>
+</html>
