@@ -130,13 +130,13 @@ def _assert_counter_was_not_hit(counters: dict[str, int], name: str) -> None:
     assert counters.get(name, 0) == 0, counters
 
 
-def test_install_utility_eval_driver_patch_adds_node_preload() -> None:
+def test_utility_eval_registers_driver_hook() -> None:
     patch_path = install_utility_eval_driver_patch()
 
-    import playwright._impl._transport as transport
-
-    env = transport.get_driver_env()
-    assert f"--require={patch_path}" in env["NODE_OPTIONS"].split()
+    assert any(
+        hook.name == "isolated_eval" and hook.preload == patch_path
+        for hook in registered_playwright_driver_hooks()
+    )
 
 
 def test_driver_hook_registry_installs_hooks_registered_after_install(
@@ -154,6 +154,9 @@ def test_driver_hook_registry_installs_hooks_registered_after_install(
     assert registered == hook_path.resolve()
     assert registered in installed
     assert f"--require={registered}" in env["NODE_OPTIONS"].split()
+    assert f"--require={get_asset_by_name('playwrightUtilityEvalPatch.js')}" in env[
+        "NODE_OPTIONS"
+    ].split()
     assert any(
         hook.name == "test-extra-hook" and hook.preload == registered
         for hook in registered_playwright_driver_hooks()
