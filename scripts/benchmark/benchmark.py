@@ -53,7 +53,7 @@ def run_playwright(mode, browser_name):
     env = {"DISPLAY": virt.get()}
 
     if browser_name == "rotunda-ubo":
-        rotunda = Rotunda(headless=headless, env=env)
+        rotunda = Rotunda(headless=headless, env=env, default_addons=True)
         browser = rotunda.start()
     elif browser_name == "firefox":
         playwright = sync_playwright().start()

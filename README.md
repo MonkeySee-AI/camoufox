@@ -42,6 +42,12 @@ with sync_playwright() as playwright:
     browser.close()
 ```
 
+Default add-ons are opt-in because they are a page-dependent tradeoff. uBlock
+takes extra processing time, but it can still be net faster on pages with lots
+of ads or trackers. For SaaS sites with minimal or no ads, keep default add-ons
+off so Rotunda does not spend time processing unnecessary extension rules.
+Pass `NewBrowser(playwright, default_addons=True)` when that tradeoff is useful.
+
 ## Agent
 
 You can also drive Rotunda directly from the command line with `uvx`, without adding it to a project first. The agent commands keep browser profiles, daemon sessions, and short resource indexes under `~/.rotunda`, so later `uvx rotunda ...` calls can attach to the same profile.

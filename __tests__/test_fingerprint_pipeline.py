@@ -853,6 +853,58 @@ def test_launch_options_generates_full_config_payload(
     assert 1 <= payload["window"]["history"]["length"] <= 5
 
 
+def test_launch_options_does_not_install_default_addons_by_default(
+    modules: tuple[Any, Any, Any],
+    fake_fingerprint: FakeFingerprint,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    default_addon_calls = []
+    monkeypatch.setattr(utils, "generate_fingerprint", lambda **_: fake_fingerprint)
+    monkeypatch.setattr(
+        utils,
+        "add_default_addons",
+        lambda addons, exclude: default_addon_calls.append((list(addons), exclude)),
+    )
+
+    options = utils.launch_options(env={"TEST_ENV": "1"}, headless=True)
+    payload = _decode_rotunda_config(options["env"])
+
+    assert default_addon_calls == []
+    assert "addons" not in payload
+
+
+def test_launch_options_can_opt_into_default_addons(
+    modules: tuple[Any, Any, Any],
+    fake_fingerprint: FakeFingerprint,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    default_path = "/tmp/rotunda-default-ubo"
+    default_addon_calls = []
+    confirmed_addons = []
+
+    def add_default_addons(addons: list[str], exclude: list[Any] | None) -> None:
+        default_addon_calls.append(exclude)
+        addons.append(default_path)
+
+    monkeypatch.setattr(utils, "generate_fingerprint", lambda **_: fake_fingerprint)
+    monkeypatch.setattr(utils, "add_default_addons", add_default_addons)
+    monkeypatch.setattr(utils, "confirm_paths", lambda addons: confirmed_addons.append(list(addons)))
+
+    options = utils.launch_options(
+        default_addons=True,
+        env={"TEST_ENV": "1"},
+        exclude_addons=[utils.DefaultAddons.UBO],
+        headless=True,
+    )
+    payload = _decode_rotunda_config(options["env"])
+
+    assert default_addon_calls == [[utils.DefaultAddons.UBO]]
+    assert confirmed_addons == [[default_path]]
+    assert payload["addons"] == [default_path]
+
+
 def test_launch_options_sets_headless_firefox_viewport_env(
     modules: tuple[Any, Any, Any],
     fake_fingerprint: FakeFingerprint,

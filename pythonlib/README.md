@@ -35,6 +35,9 @@ with Rotunda(headless=False) as browser:
 
 `Rotunda(...)` launches the browser. `NewContext(...)` creates a Playwright browser context with a fresh Rotunda fingerprint applied before page scripts run.
 
+Rotunda does not install default add-ons unless you ask for them. If a workflow
+needs the bundled default add-ons, launch with `Rotunda(default_addons=True)`.
+
 ## Async Usage
 
 ```python
