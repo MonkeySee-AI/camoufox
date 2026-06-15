@@ -1,17 +1,39 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
+# dependencies = [
+#   "click>=8.1",
+# ]
 # ///
+
+"""Update Rotunda's validated Playwright upper bound for the automation workflow.
+
+The script reads the Playwright dependency from ``pythonlib/pyproject.toml``,
+finds the latest stable, non-yanked Playwright release on PyPI, and compares it
+with Rotunda's current ``<=`` maximum. When a newer release exists, it can patch
+only that upper bound in place and emit GitHub Actions outputs for the branch
+name, PR title, old max version, latest version, and whether a PR is needed.
+"""
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
+import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+import click
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from resolve_playwright_versions import read_playwright_version_bounds  # noqa: E402
 
 
 PYPI_PACKAGE_URL = "https://pypi.org/pypi/{package}/json"
@@ -19,8 +41,6 @@ STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 DEPENDENCY_LINE_RE = re.compile(
     r'^(?P<indent>\s*)"playwright(?P<specifier>[^"]*)",(?P<suffix>.*)$'
 )
-MINIMUM_SPECIFIER_RE = re.compile(r">=\s*(\d+\.\d+\.\d+)")
-MAXIMUM_SPECIFIER_RE = re.compile(r"<=\s*(\d+\.\d+\.\d+)")
 
 
 def stable_version_tuple(version: str) -> tuple[int, int, int]:
@@ -58,6 +78,14 @@ def fetch_latest_stable_version(package: str, *, timeout: float) -> str:
 
 
 def find_playwright_dependency_line(lines: list[str]) -> tuple[int, re.Match[str]]:
+    """Return the exact Playwright dependency line to update in place.
+
+    We intentionally avoid loading and rewriting TOML here: stdlib tomllib is
+    read-only, and a TOML writer would add another script dependency while
+    risking unrelated formatting churn. The package metadata keeps this as a
+    simple PEP 621 dependency string, so a narrow [project].dependencies scan
+    lets the updater change only the Playwright upper bound.
+    """
     in_project = False
     in_dependencies = False
 
@@ -91,40 +119,24 @@ def find_playwright_dependency_line(lines: list[str]) -> tuple[int, re.Match[str
     )
 
 
-def read_playwright_bounds(pyproject_path: Path) -> tuple[str, str]:
-    lines = pyproject_path.read_text(encoding="utf-8").splitlines()
-    _, match = find_playwright_dependency_line(lines)
-    specifier = match.group("specifier")
-    minimum_match = MINIMUM_SPECIFIER_RE.search(specifier)
-    maximum_match = MAXIMUM_SPECIFIER_RE.search(specifier)
-    if not minimum_match:
+def require_playwright_version_bounds(pyproject_path: Path) -> tuple[str, str]:
+    minimum_version, maximum_version = read_playwright_version_bounds(pyproject_path)
+    if not minimum_version:
         raise ValueError(
             "The Playwright dependency must include a >=x.y.z lower bound."
         )
-    if not maximum_match:
+    if not maximum_version:
         raise ValueError(
             "The Playwright dependency must include a <=x.y.z upper bound."
         )
-    return minimum_match.group(1), maximum_match.group(1)
+    return minimum_version, maximum_version
 
 
 def update_playwright_max(pyproject_path: Path, latest_version: str) -> tuple[str, str]:
+    minimum_version, current_maximum = require_playwright_version_bounds(pyproject_path)
     lines = pyproject_path.read_text(encoding="utf-8").splitlines()
     index, match = find_playwright_dependency_line(lines)
-    specifier = match.group("specifier")
-    minimum_match = MINIMUM_SPECIFIER_RE.search(specifier)
-    maximum_match = MAXIMUM_SPECIFIER_RE.search(specifier)
-    if not minimum_match:
-        raise ValueError(
-            "The Playwright dependency must include a >=x.y.z lower bound."
-        )
-    if not maximum_match:
-        raise ValueError(
-            "The Playwright dependency must include a <=x.y.z upper bound."
-        )
 
-    minimum_version = minimum_match.group(1)
-    current_maximum = maximum_match.group(1)
     stable_version_tuple(latest_version)
     lines[index] = (
         f'{match.group("indent")}"playwright>={minimum_version},<={latest_version}",'
@@ -141,58 +153,63 @@ def write_github_output(path: Path | None, name: str, value: str) -> None:
         handle.write(f"{name}={value}\n")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Bump Rotunda's validated Playwright upper bound."
+@click.command()
+@click.option(
+    "--package",
+    "package_name",
+    default="playwright",
+    show_default=True,
+    help="PyPI package name to inspect.",
+)
+@click.option(
+    "--pyproject",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=Path("pythonlib/pyproject.toml"),
+    show_default=True,
+    help="Path to the pyproject.toml containing the Playwright dependency.",
+)
+@click.option(
+    "--timeout",
+    default=20.0,
+    show_default=True,
+    type=float,
+    help="PyPI request timeout in seconds.",
+)
+@click.option(
+    "--latest-version",
+    help="Override the latest version for deterministic local checks.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report whether an update is needed without editing files.",
+)
+@click.option(
+    "--github-output",
+    type=click.Path(path_type=Path),
+    help="Optional path to GITHUB_OUTPUT.",
+)
+def main(
+    package_name: str,
+    pyproject: Path,
+    timeout: float,
+    latest_version: str | None,
+    dry_run: bool,
+    github_output: Path | None,
+) -> None:
+    """Bump Rotunda's validated Playwright upper bound."""
+    latest_version = latest_version or fetch_latest_stable_version(
+        package_name,
+        timeout=timeout,
     )
-    parser.add_argument(
-        "--package",
-        default="playwright",
-        help="PyPI package name to inspect.",
-    )
-    parser.add_argument(
-        "--pyproject",
-        type=Path,
-        default=Path("pythonlib/pyproject.toml"),
-        help="Path to the pyproject.toml containing the Playwright dependency.",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=20.0,
-        help="PyPI request timeout in seconds.",
-    )
-    parser.add_argument(
-        "--latest-version",
-        help="Override the latest version for deterministic local checks.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Report whether an update is needed without editing files.",
-    )
-    parser.add_argument(
-        "--github-output",
-        type=Path,
-        help="Optional path to GITHUB_OUTPUT.",
-    )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    latest_version = args.latest_version or fetch_latest_stable_version(
-        args.package,
-        timeout=args.timeout,
-    )
-    minimum_version, current_maximum = read_playwright_bounds(args.pyproject)
+    minimum_version, current_maximum = require_playwright_version_bounds(pyproject)
 
     latest_tuple = stable_version_tuple(latest_version)
     current_tuple = stable_version_tuple(current_maximum)
     update_needed = latest_tuple > current_tuple
 
-    if update_needed and not args.dry_run:
-        update_playwright_max(args.pyproject, latest_version)
+    if update_needed and not dry_run:
+        update_playwright_max(pyproject, latest_version)
 
     pr_title = f"autoplaywright: {latest_version}"
     branch_name = f"automation/autoplaywright-{latest_version}"
@@ -205,7 +222,7 @@ def main() -> None:
         "branch_name": branch_name,
     }
     for name, value in outputs.items():
-        write_github_output(args.github_output, name, value)
+        write_github_output(github_output, name, value)
 
     print(f"Current Playwright max: {current_maximum}")
     print(f"Latest stable Playwright: {latest_version}")
