@@ -85,6 +85,7 @@ def launch_options(
     addons: list[str] | None = None,
     fonts: list[str] | None = None,
     custom_fonts_only: bool | None = None,
+    default_addons: bool | None = None,
     exclude_addons: list[DefaultAddons] | None = None,
     screen: Screen | None = None,
     window: tuple[int, int] | None = None,
@@ -129,6 +130,7 @@ def launch_options(
         addons=addons,
         fonts=fonts,
         custom_fonts_only=custom_fonts_only,
+        default_addons=default_addons,
         exclude_addons=exclude_addons,
         screen=screen,
         window=window,
@@ -415,6 +417,7 @@ class LaunchOptionBuilder:
     addons: list[str] | None
     fonts: list[str] | None
     custom_fonts_only: bool | None
+    default_addons: bool | None
     exclude_addons: list[DefaultAddons] | None
     screen: Screen | None
     window: tuple[int, int] | None
@@ -456,6 +459,8 @@ class LaunchOptionBuilder:
             self.headless = False
         if self.custom_fonts_only is None:
             self.custom_fonts_only = False
+        if self.default_addons is None:
+            self.default_addons = False
         if self.i_know_what_im_doing is None:
             self.i_know_what_im_doing = False
 
@@ -564,7 +569,8 @@ class LaunchOptionBuilder:
         addons = self._addons_list()
         config = self._profile()
 
-        add_default_addons(addons, self.exclude_addons)
+        if self.default_addons:
+            add_default_addons(addons, self.exclude_addons)
         if not addons:
             return
 
