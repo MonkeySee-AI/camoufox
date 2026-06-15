@@ -75,6 +75,29 @@ with sync_playwright() as playwright:
     browser.close()
 ```
 
+## Isolated Eval
+
+Rotunda exposes Playwright's isolated utility context when you need custom DOM reads
+that should avoid page monkeypatches:
+
+```python
+from playwright.sync_api import sync_playwright
+from rotunda import NewBrowser, NewContext, evaluate_in_utility
+
+with sync_playwright() as playwright:
+    browser = NewBrowser(playwright)
+    context = NewContext(browser)
+    page = context.new_page()
+    page.goto("https://example.com")
+
+    title = evaluate_in_utility(page, "() => document.title")
+```
+
+For async code, use `async_evaluate_in_utility(page, expression, arg=None)`.
+Import `rotunda` before starting `sync_playwright()` / `async_playwright()` so
+Rotunda can install the Playwright driver preload. `Rotunda(...)` and
+`AsyncRotunda(...)` handle this automatically.
+
 ## Proxies And GeoIP
 
 Pass proxies in the same shape Playwright expects. With `rotunda[geoip]`, `geoip=True` derives location data from the current public IP or proxy exit IP.

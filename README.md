@@ -48,6 +48,21 @@ of ads or trackers. For SaaS sites with minimal or no ads, keep default add-ons
 off so Rotunda does not spend time processing unnecessary extension rules.
 Pass `NewBrowser(playwright, default_addons=True)` when that tradeoff is useful.
 
+### Isolated eval
+
+For custom DOM reads that should avoid page monkeypatches, Rotunda exposes
+Playwright's isolated utility context:
+
+```python
+from rotunda import evaluate_in_utility
+
+title = evaluate_in_utility(page, "() => document.title")
+```
+
+Async code can use `async_evaluate_in_utility(page, expression, arg=None)`.
+Import `rotunda` before starting Playwright so Rotunda can install the driver
+preload; `Rotunda(...)` / `AsyncRotunda(...)` do this automatically.
+
 ## Agent
 
 You can also drive Rotunda directly from the command line with `uvx`, without adding it to a project first. The agent commands keep browser profiles, daemon sessions, and short resource indexes under `~/.rotunda`, so later `uvx rotunda ...` calls can attach to the same profile.
