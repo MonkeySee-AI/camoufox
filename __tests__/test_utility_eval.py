@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import playwright
 import pytest
 from playwright._impl._errors import Error as PlaywrightError
-from playwright._impl._js_handle import parse_value
+from playwright.sync_api import sync_playwright
 
 from rotunda.assets import get_asset_by_name
 from rotunda.playwright_driver_hooks import (
@@ -18,23 +18,19 @@ from rotunda.playwright_driver_hooks import (
     registered_playwright_driver_hooks,
 )
 from rotunda.utility_eval import (
-    async_evaluate_in_utility,
     evaluate_in_utility,
     install_utility_eval_driver_patch,
 )
 
 
 class FakeChannel:
-    def __init__(self, response: Any = None, error: Exception | None = None) -> None:
+    def __init__(self, error: Exception) -> None:
         self.calls: list[tuple[str, Any, dict[str, Any]]] = []
-        self.response = {"n": 7} if response is None else response
         self.error = error
 
     async def send(self, method: str, timeout: Any, params: dict[str, Any]) -> Any:
         self.calls.append((method, timeout, params))
-        if self.error:
-            raise self.error
-        return self.response
+        raise self.error
 
 
 class FakeFrame:
@@ -52,9 +48,86 @@ class FakeAsyncPage:
         self._impl_obj = FakePageImpl(frame)
 
 
-class FakeSyncPage(FakeAsyncPage):
-    def _sync(self, coro: Any) -> Any:
-        return asyncio.run(coro)
+_INSTRUMENTED_DOM_READS_HTML = """
+<!doctype html>
+<html>
+<head>
+  <script>
+    (() => {
+      const counts = Object.create(null);
+      const count = name => counts[name] = (counts[name] || 0) + 1;
+      const wrap = (owner, name, label) => {
+        const original = owner[name];
+        Object.defineProperty(owner, name, {
+          configurable: true,
+          writable: true,
+          value: function(...args) {
+            count(label);
+            return original.apply(this, args);
+          },
+        });
+      };
+      Object.defineProperty(window, "__rotundaReadCounters", { value: counts });
+      Object.defineProperty(window, "__resetRotundaReadCounters", {
+        value: () => {
+          for (const key of Object.keys(counts))
+            delete counts[key];
+        },
+      });
+      wrap(Document.prototype, "querySelector", "Document.querySelector");
+      wrap(Document.prototype, "querySelectorAll", "Document.querySelectorAll");
+      wrap(Element.prototype, "getAttribute", "Element.getAttribute");
+      wrap(Element.prototype, "getBoundingClientRect", "Element.getBoundingClientRect");
+      wrap(Element.prototype, "closest", "Element.closest");
+      const originalGetComputedStyle = window.getComputedStyle;
+      Object.defineProperty(window, "getComputedStyle", {
+        configurable: true,
+        writable: true,
+        value: function(...args) {
+          count("window.getComputedStyle");
+          return originalGetComputedStyle.apply(this, args);
+        },
+      });
+    })();
+  </script>
+</head>
+<body>
+  <main data-root>
+    <div id="target" class="item" data-name="target" style="width: 17px">hello</div>
+    <div class="item">world</div>
+  </main>
+</body>
+</html>
+"""
+
+_DOM_READ_EVAL = """
+() => {
+  const root = document.querySelector("[data-root]");
+  const allItems = document.querySelectorAll(".item");
+  const target = document.querySelector("#target");
+  const style = window.getComputedStyle(target);
+  const rect = target.getBoundingClientRect();
+  return {
+    itemCount: allItems.length,
+    id: target.getAttribute("id"),
+    closestRoot: target.closest("[data-root]") === root,
+    display: style.display,
+    width: rect.width,
+  };
+}
+"""
+
+
+def _read_counters(page: Any) -> dict[str, int]:
+    return page.evaluate("() => ({ ...window.__rotundaReadCounters })")
+
+
+def _assert_counter_was_hit(counters: dict[str, int], name: str) -> None:
+    assert counters.get(name, 0) > 0, counters
+
+
+def _assert_counter_was_not_hit(counters: dict[str, int], name: str) -> None:
+    assert counters.get(name, 0) == 0, counters
 
 
 def test_install_utility_eval_driver_patch_adds_node_preload() -> None:
@@ -121,39 +194,58 @@ if (validated.expression !== "() => 1")
     subprocess.run([node, "-e", script], check=True, env=env)
 
 
-@pytest.mark.asyncio
-async def test_async_evaluate_in_utility_sends_rotunda_protocol_method() -> None:
-    channel = FakeChannel(response={"n": 9})
-    page = FakeAsyncPage(FakeFrame(channel))
+@pytest.mark.integration
+def test_isolated_eval_does_not_trip_page_shadowed_dom_reads(
+    pytestconfig: pytest.Config,
+) -> None:
+    if not pytestconfig.getoption("--integration"):
+        pytest.skip("pass --integration to run browser integration coverage")
 
-    result = await async_evaluate_in_utility(page, "arg => arg.count", {"count": 9})
+    with sync_playwright() as playwright_instance:
+        try:
+            browser = playwright_instance.firefox.launch(headless=True)
+        except Exception as error:
+            text = str(error)
+            if "Executable doesn't exist" in text or "Please run" in text:
+                pytest.skip("Playwright Firefox is not installed")
+            raise
 
-    assert result == 9
-    assert len(channel.calls) == 1
-    method, timeout, params = channel.calls[0]
-    assert method == "rotundaEvaluateInUtility"
-    assert timeout is None
-    assert params["expression"] == "arg => arg.count"
-    assert parse_value(params["arg"]["value"]) == {"count": 9}
-    assert params["arg"]["handles"] == []
+        try:
+            page = browser.new_page()
+            page.goto(
+                "data:text/html," + quote(_INSTRUMENTED_DOM_READS_HTML),
+                wait_until="load",
+            )
 
+            page.evaluate("() => window.__resetRotundaReadCounters()")
+            main_world_result = page.evaluate(_DOM_READ_EVAL)
+            main_world_counters = _read_counters(page)
 
-def test_sync_evaluate_in_utility_sends_rotunda_protocol_method() -> None:
-    channel = FakeChannel(response={"s": "utility"})
-    page = FakeSyncPage(FakeFrame(channel))
+            page.evaluate("() => window.__resetRotundaReadCounters()")
+            isolated_result = evaluate_in_utility(page, _DOM_READ_EVAL)
+            isolated_counters = _read_counters(page)
+        finally:
+            browser.close()
 
-    result = evaluate_in_utility(page, "() => 'utility'")
-
-    assert result == "utility"
-    assert channel.calls[0][0] == "rotundaEvaluateInUtility"
+    assert isolated_result == main_world_result
+    for name in [
+        "Document.querySelector",
+        "Document.querySelectorAll",
+        "window.getComputedStyle",
+        "Element.getBoundingClientRect",
+        "Element.getAttribute",
+        "Element.closest",
+    ]:
+        _assert_counter_was_hit(main_world_counters, name)
+        _assert_counter_was_not_hit(isolated_counters, name)
 
 
 @pytest.mark.asyncio
 async def test_missing_driver_patch_error_is_actionable() -> None:
+    from rotunda.utility_eval import async_evaluate_in_utility
+
     channel = FakeChannel(
-        error=PlaywrightError(
-            "Unknown scheme for Params: Frame.rotundaEvaluateInUtility"
-        )
+        PlaywrightError("Unknown scheme for Params: Frame.rotundaEvaluateInUtility")
     )
     page = FakeAsyncPage(FakeFrame(channel))
 
