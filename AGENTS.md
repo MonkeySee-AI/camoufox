@@ -20,8 +20,8 @@ real behavioral guarantee.
 
 For unit and structural tests, prefer the `test_{original_filename}.py`
 counterpart for the implementation file under test, for example
-`playwright_driver_hooks.py` -> `test_playwright_driver_hooks.py`. Integration
-tests may be named around the workflow or behavior they cover.
+`driver_hooks/base.py` -> `driver_hooks/test_base.py`. Integration tests may
+be named around the workflow or behavior they cover.
 
 In test files, add a one- or two-line narrative comment before large setup,
 script, fixture, or assertion blocks. The comment should explain what behavior

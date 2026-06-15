@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .assets import get_asset_by_name
+from ..assets import get_asset_by_name
 
 _DRIVER_HOOKS: dict[str, PlaywrightDriverHook] = {}
 _HOOKS_INSTALLED = False
@@ -62,6 +62,32 @@ def register_playwright_driver_hook(name: str, preload: str | Path) -> Path:
 
 def registered_playwright_driver_hooks() -> tuple[PlaywrightDriverHook, ...]:
     return tuple(_DRIVER_HOOKS.values())
+
+
+def raise_if_missing_playwright_driver_hook(
+    error: Exception,
+    *,
+    method: str,
+    feature: str,
+) -> None:
+    """
+    Convert Playwright's missing driver-extension errors into actionable guidance.
+
+    Playwright rejects protocol calls that are not present in its driver schema or
+    dispatcher. Rotunda driver hooks add those methods before the driver starts;
+    if a connection was already started without the hook preload, the raw
+    Playwright error names the missing protocol method but not the install fix.
+    """
+    message = str(error)
+    if method not in message:
+        return
+    if "Unknown scheme" not in message and "does not implement" not in message:
+        return
+    raise RuntimeError(
+        f"Rotunda {feature} requires its Playwright driver preload. Import "
+        "`rotunda` or call `install_playwright_driver_hooks()` before starting "
+        "sync_playwright()/async_playwright(), then restart the Playwright connection."
+    ) from error
 
 
 def install_playwright_driver_hooks() -> tuple[Path, ...]:
@@ -110,6 +136,7 @@ def _node_options_with_hooks(existing: str) -> str:
 __all__ = [
     "PlaywrightDriverHook",
     "install_playwright_driver_hooks",
+    "raise_if_missing_playwright_driver_hook",
     "register_playwright_driver_hook",
     "registered_playwright_driver_hooks",
 ]

@@ -1,30 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from playwright._impl._errors import Error as PlaywrightError
 from playwright._impl._js_handle import parse_result, serialize_argument
 
-from .playwright_driver_hooks import (
+from .base import (
     install_playwright_driver_hooks,
+    raise_if_missing_playwright_driver_hook,
     register_playwright_driver_hook,
 )
 
 _PATCH_ASSET_NAME = "playwrightUtilityEvalPatch.js"
-_HOOK_PRELOAD = register_playwright_driver_hook("isolated_eval", _PATCH_ASSET_NAME)
-
-
-def install_utility_eval_driver_patch() -> Path:
-    """
-    Install Rotunda's Playwright driver hook for isolated eval calls.
-
-    This must run before Playwright starts its driver subprocess. Importing
-    `rotunda` does that automatically for normal use; call this directly only
-    when a process starts Playwright before importing the top-level package.
-    """
-    install_playwright_driver_hooks()
-    return _HOOK_PRELOAD
+register_playwright_driver_hook("isolated_eval", _PATCH_ASSET_NAME)
 
 
 def evaluate_in_utility(target: Any, expression: str, arg: Any = None) -> Any:
@@ -73,7 +61,11 @@ async def _evaluate_in_utility_impl(frame: Any, expression: str, arg: Any) -> An
             )
         )
     except PlaywrightError as error:
-        _raise_if_missing_driver_patch(error, "rotundaEvaluateInUtility")
+        raise_if_missing_playwright_driver_hook(
+            error,
+            method="rotundaEvaluateInUtility",
+            feature="isolated eval",
+        )
         raise
 
 
@@ -81,7 +73,7 @@ def _frame_impl_from_target(target: Any) -> Any:
     impl = getattr(target, "_impl_obj", target)
     frame = getattr(impl, "_main_frame", impl)
     if not hasattr(frame, "_channel"):
-        raise TypeError("utility eval target must be a Playwright Page or Frame")
+        raise TypeError("isolated eval target must be a Playwright Page or Frame")
     return frame
 
 
@@ -89,30 +81,16 @@ def _sync_runner_from_target(target: Any) -> Any:
     sync_runner = getattr(target, "_sync", None)
     if not callable(sync_runner):
         raise TypeError(
-            "sync utility eval expects a Playwright sync Page or Frame; "
+            "sync isolated eval expects a Playwright sync Page or Frame; "
             "use async_evaluate_in_utility with async Page/Frame objects"
         )
     return sync_runner
 
 
-def _raise_if_missing_driver_patch(error: PlaywrightError, method: str) -> None:
-    message = str(error)
-    if method not in message:
-        return
-    if "Unknown scheme" not in message and "does not implement" not in message:
-        return
-    raise RuntimeError(
-        "Rotunda utility eval requires its Playwright driver preload. Import "
-        "`rotunda` or call `install_utility_eval_driver_patch()` before starting "
-        "sync_playwright()/async_playwright(), then restart the Playwright connection."
-    ) from error
-
-
-install_utility_eval_driver_patch()
+install_playwright_driver_hooks()
 
 
 __all__ = [
     "async_evaluate_in_utility",
     "evaluate_in_utility",
-    "install_utility_eval_driver_patch",
 ]

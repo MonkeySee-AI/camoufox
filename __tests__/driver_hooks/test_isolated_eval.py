@@ -12,14 +12,15 @@ from playwright.sync_api import sync_playwright
 
 from __tests__.fixtures import get_fixtures_path
 from rotunda.assets import get_asset_by_name
-from rotunda.playwright_driver_hooks import registered_playwright_driver_hooks
-from rotunda.utility_eval import (
-    evaluate_in_utility,
-    install_utility_eval_driver_patch,
+from rotunda.driver_hooks.base import (
+    install_playwright_driver_hooks,
+    registered_playwright_driver_hooks,
 )
+from rotunda.driver_hooks.isolated_eval import evaluate_in_utility
 
 _INSTRUMENTED_DOM_READS_HTML = get_fixtures_path("html/instrumented_dom_reads.html")
 _DOM_READ_EVAL = get_fixtures_path("js/dom_read_eval.js").read_text()
+_ISOLATED_EVAL_PATCH_SENTINEL = get_fixtures_path("js/assert_isolated_eval_patch.js")
 
 
 class FakeChannel:
@@ -59,16 +60,18 @@ def _assert_counter_was_not_hit(counters: dict[str, int], name: str) -> None:
     assert counters.get(name, 0) == 0, counters
 
 
-def test_utility_eval_registers_driver_hook() -> None:
-    patch_path = install_utility_eval_driver_patch()
+def test_isolated_eval_registers_driver_hook() -> None:
+    patch_path = get_asset_by_name("playwrightUtilityEvalPatch.js")
+    installed = install_playwright_driver_hooks()
 
+    assert patch_path in installed
     assert any(
         hook.name == "isolated_eval" and hook.preload == patch_path
         for hook in registered_playwright_driver_hooks()
     )
 
 
-def test_playwright_utility_eval_patch_adds_dispatcher_methods_and_schema() -> None:
+def test_playwright_isolated_eval_patch_adds_dispatcher_methods_and_schema() -> None:
     from playwright._impl._driver import compute_driver_executable
 
     node, _ = compute_driver_executable()
@@ -78,30 +81,15 @@ def test_playwright_utility_eval_patch_adds_dispatcher_methods_and_schema() -> N
     )
     # This is a version-drift sentinel for the private Playwright modules our
     # preload patches; behavioral isolation is covered by the browser test below.
-    script = f"""
-const base = {str(driver_lib)!r};
-require(base + "/protocol/validator.js");
-const {{ maybeFindValidator }} = require(base + "/protocol/validatorPrimitives.js");
-const {{ FrameDispatcher }} = require(base + "/server/dispatchers/frameDispatcher.js");
-const paramsValidator = maybeFindValidator("Frame", "rotundaEvaluateInUtility", "Params");
-const resultValidator = maybeFindValidator("Frame", "rotundaEvaluateInUtility", "Result");
-if (!paramsValidator || !resultValidator)
-  throw new Error("missing utility eval validator");
-if (typeof FrameDispatcher.prototype.rotundaEvaluateInUtility !== "function")
-  throw new Error("missing value utility eval dispatcher");
-const validated = paramsValidator(
-  {{ expression: "() => 1", arg: {{ value: {{ n: 3 }}, handles: [] }} }},
-  "",
-  {{ binary: "fromBase64", isUnderTest: () => false, tChannelImpl: () => null }}
-);
-if (validated.expression !== "() => 1")
-  throw new Error("validator did not preserve expression");
-"""
     env = os.environ.copy()
     env["NODE_OPTIONS"] = (
         f"--require={patch_path} {env.get('NODE_OPTIONS', '')}".strip()
     )
-    subprocess.run([node, "-e", script], check=True, env=env)
+    subprocess.run(
+        [node, str(_ISOLATED_EVAL_PATCH_SENTINEL), str(driver_lib)],
+        check=True,
+        env=env,
+    )
 
 
 @pytest.mark.integration
@@ -151,7 +139,7 @@ def test_isolated_eval_does_not_trip_page_shadowed_dom_reads(
 
 @pytest.mark.asyncio
 async def test_missing_driver_patch_error_is_actionable() -> None:
-    from rotunda.utility_eval import async_evaluate_in_utility
+    from rotunda.driver_hooks.isolated_eval import async_evaluate_in_utility
 
     channel = FakeChannel(
         PlaywrightError("Unknown scheme for Params: Frame.rotundaEvaluateInUtility")

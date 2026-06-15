@@ -15,9 +15,9 @@ from rotunda.virtdisplay import VirtualDisplay
 
 from . import remote_juggler as _remote_juggler
 from .debug_dump import attach_debug_metadata, install_sync_context_debug_dump
+from .driver_hooks import install_playwright_driver_hooks
 from .exceptions import InvalidProxy
 from .fingerprints import _derive_browser_major_version, generate_context_fingerprint
-from .playwright_driver_hooks import install_playwright_driver_hooks
 from .utils import launch_options, persistent_context_options, sync_attach_vd
 
 ConnectOverRemoteJuggler = _remote_juggler.ConnectOverRemoteJuggler
