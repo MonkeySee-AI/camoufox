@@ -39,8 +39,8 @@ def install_utility_eval_driver_patch() -> Path:
             env["NODE_OPTIONS"] = f"{preload_option} {existing}".strip()
         return env
 
-    driver.get_driver_env = get_driver_env_with_utility_eval
-    transport.get_driver_env = get_driver_env_with_utility_eval
+    vars(driver)["get_driver_env"] = get_driver_env_with_utility_eval
+    vars(transport)["get_driver_env"] = get_driver_env_with_utility_eval
     _PATCH_INSTALLED = True
     return patch_path
 
