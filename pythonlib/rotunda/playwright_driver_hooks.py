@@ -1,3 +1,16 @@
+"""
+Registry for Rotunda patches that must run inside Playwright's Node driver.
+
+Prefer public Playwright APIs or Rotunda/Juggler primitives when they can express
+the behavior. This registry exists for the narrower cases where Playwright's
+driver owns state above the browser protocol layer: dispatcher schemas, channel
+GUIDs, frame/execution-context objects, JSHandle serialization, selector
+injected-script state, and other bookkeeping that raw CDP/Juggler side channels
+cannot safely recreate. Unknown or unregistered protocol calls are rejected by
+the Playwright dispatcher, so these hooks let Rotunda register a small, explicit
+driver-side extension before the driver starts.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,6 +31,13 @@ class PlaywrightDriverHook:
 def register_playwright_driver_hook(name: str, preload: str | Path) -> Path:
     """
     Register a Node preload that patches Playwright's JavaScript driver process.
+
+    Use this only when the desired behavior has to live inside Playwright's
+    existing driver connection. A separate browser-protocol connection is not
+    equivalent for these cases: Playwright validates and rejects unregistered
+    protocol methods, and it owns higher-level state on top of browser
+    primitives, including frame dispatchers, execution contexts, handles,
+    selector utility-world scripts, and Python<->JS value serialization.
 
     `preload` can be a packaged Rotunda asset name or an absolute path. Registered
     hooks are installed into future Playwright driver subprocesses by
