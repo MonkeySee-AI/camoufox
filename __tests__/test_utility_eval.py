@@ -12,6 +12,11 @@ from playwright._impl._errors import Error as PlaywrightError
 from playwright._impl._js_handle import parse_value
 
 from rotunda.assets import get_asset_by_name
+from rotunda.playwright_driver_hooks import (
+    install_playwright_driver_hooks,
+    register_playwright_driver_hook,
+    registered_playwright_driver_hooks,
+)
 from rotunda.utility_eval import (
     async_evaluate_in_utility,
     evaluate_in_utility,
@@ -51,6 +56,7 @@ class FakeSyncPage(FakeAsyncPage):
     def _sync(self, coro: Any) -> Any:
         return asyncio.run(coro)
 
+
 def test_install_utility_eval_driver_patch_adds_node_preload() -> None:
     patch_path = install_utility_eval_driver_patch()
 
@@ -58,6 +64,27 @@ def test_install_utility_eval_driver_patch_adds_node_preload() -> None:
 
     env = transport.get_driver_env()
     assert f"--require={patch_path}" in env["NODE_OPTIONS"].split()
+
+
+def test_driver_hook_registry_installs_hooks_registered_after_install(
+    tmp_path: Path,
+) -> None:
+    hook_path = tmp_path / "extra-driver-hook.js"
+    hook_path.write_text('"use strict";\n')
+
+    registered = register_playwright_driver_hook("test-extra-hook", hook_path)
+    installed = install_playwright_driver_hooks()
+
+    import playwright._impl._transport as transport
+
+    env = transport.get_driver_env()
+    assert registered == hook_path.resolve()
+    assert registered in installed
+    assert f"--require={registered}" in env["NODE_OPTIONS"].split()
+    assert any(
+        hook.name == "test-extra-hook" and hook.preload == registered
+        for hook in registered_playwright_driver_hooks()
+    )
 
 
 def test_playwright_utility_eval_patch_adds_dispatcher_methods_and_schema() -> None:

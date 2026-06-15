@@ -6,48 +6,30 @@ from typing import Any
 from playwright._impl._errors import Error as PlaywrightError
 from playwright._impl._js_handle import parse_result, serialize_argument
 
-from .assets import get_asset_by_name
+from .playwright_driver_hooks import (
+    install_playwright_driver_hooks,
+    register_playwright_driver_hook,
+)
 
 _PATCH_ASSET_NAME = "playwrightUtilityEvalPatch.js"
-_PATCH_INSTALLED = False
+_HOOK_PRELOAD = register_playwright_driver_hook("isolated_eval", _PATCH_ASSET_NAME)
 
 
 def install_utility_eval_driver_patch() -> Path:
     """
-    Install Rotunda's Playwright driver preload for utility-world eval calls.
+    Install Rotunda's Playwright driver hook for isolated eval calls.
 
     This must run before Playwright starts its driver subprocess. Importing
     `rotunda` does that automatically for normal use; call this directly only
     when a process starts Playwright before importing the top-level package.
     """
-    global _PATCH_INSTALLED
-
-    patch_path = get_asset_by_name(_PATCH_ASSET_NAME)
-    if _PATCH_INSTALLED:
-        return patch_path
-
-    import playwright._impl._driver as driver
-    import playwright._impl._transport as transport
-
-    original_get_driver_env = driver.get_driver_env
-    preload_option = f"--require={patch_path}"
-
-    def get_driver_env_with_utility_eval() -> dict[str, str]:
-        env = original_get_driver_env()
-        existing = env.get("NODE_OPTIONS", "")
-        if preload_option not in existing.split():
-            env["NODE_OPTIONS"] = f"{preload_option} {existing}".strip()
-        return env
-
-    vars(driver)["get_driver_env"] = get_driver_env_with_utility_eval
-    vars(transport)["get_driver_env"] = get_driver_env_with_utility_eval
-    _PATCH_INSTALLED = True
-    return patch_path
+    install_playwright_driver_hooks()
+    return _HOOK_PRELOAD
 
 
 def evaluate_in_utility(target: Any, expression: str, arg: Any = None) -> Any:
     """
-    Evaluate JavaScript in Playwright's hidden utility world for a sync Page/Frame.
+    Evaluate JavaScript in Playwright's isolated utility context for a sync Page/Frame.
 
     `target` may be a Playwright sync `Page` or `Frame`. The expression and arg
     use the same serialization rules as Playwright's `evaluate`.
@@ -66,7 +48,7 @@ async def async_evaluate_in_utility(
     target: Any, expression: str, arg: Any = None
 ) -> Any:
     """
-    Evaluate JavaScript in Playwright's hidden utility world for an async Page/Frame.
+    Evaluate JavaScript in Playwright's isolated utility context for an async Page/Frame.
 
     `target` may be a Playwright async `Page` or `Frame`. The expression and arg
     use the same serialization rules as Playwright's `evaluate`.
