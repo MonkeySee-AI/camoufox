@@ -134,8 +134,27 @@ Stop the profile daemon when you are done:
 uvx rotunda agent stop 1
 ```
 
+### Local agent benchmark
+
+In a local Acme Mock Console benchmark, three agents completed the same
+dashboard, project form, contact form, modal, toast, and disclosure workflow:
+
+| Surface | Result | Duration | Calls | Screenshots |
+| --- | ---: | ---: | ---: | ---: |
+| Codex integrated browser | Pass | ~2m 26s | 12 batches | 0 |
+| Rotunda CLI | Pass | ~3m 40s | 33 CLI commands | 0 |
+| Computer Use | Pass | ~8m 13s | 69 UI/tool calls | 0 |
+
+The Codex integrated browser was faster primarily because it drives the DOM
+directly and does not include Rotunda's humanized mouse and keyboard timing.
+Rotunda's tradeoff is intentional: `fill`, `type`, clicks, and movement follow
+human-like input paths, which costs time but is closer to a real local browser
+session. For setup, agent instructions, caveats, and the full interpretation,
+see [Benchmarks](docs/BENCHMARKS.md).
+
 ## Additional reading
 
+- [Benchmarks](docs/BENCHMARKS.md): local timing comparison between Rotunda CLI, the Codex integrated browser, and Computer Use.
 - [Remote Juggler](docs/remote-juggler.md): launch Rotunda with a fixed Juggler endpoint and connect from another local process.
 - [Live Screencast Stream](docs/live-screencast-stream.md): stream Rotunda browser frames over HLS for QuickTime or VLC.
 - [Agent CLI Architecture](docs/agent-cli-architecture.md): understand the daemon, resource-index, heartbeat, and singleton process model behind `uvx rotunda agent`.
