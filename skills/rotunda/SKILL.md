@@ -155,6 +155,8 @@ uvx rotunda agent extract <page> --format html --output /tmp/page.html
 
 Prefer `markdown` for summarizing content, `links` for choosing where to navigate next, and `forms` for understanding inputs before filling them.
 
+Prefer text processing over screenshots almost always. `describe` and `extract` are faster and more efficient because they return compact, searchable DOM or page text that can be reasoned over directly without image rendering, image transfer, or visual interpretation. Use screenshots only when the task depends on context that text cannot expose, such as images, graphics, charts, maps, canvas content, visual layout, styling, overlap, cropping, or pixel-level verification. Otherwise proceed by reading and navigating from text output.
+
 ## Interacting With Elements
 
 Refs come from `describe`. Many commands accept just `<ref>` because Rotunda stores the page association for the element:
@@ -204,6 +206,8 @@ uvx rotunda agent upload <file-input-ref> /absolute/path/to/file.pdf
 Use absolute file paths for uploads and generated artifacts whenever possible.
 
 ## Screenshots
+
+Use screenshots sparingly. Capture one only when text output is insufficient for the decision or verification needed.
 
 Capture the viewport, full page, or one element:
 
