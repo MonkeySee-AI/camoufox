@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Acme Console{% endblock %} · Acme</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>Acme&nbsp;Console</span>
+    </div>
+    <nav>
+      <a href="/"            class="{% if active=='dashboard'  %}active{% endif %}">Dashboard</a>
+      <a href="/projects"    class="{% if active=='projects'   %}active{% endif %}">Projects</a>
+      <a href="/upload"      class="{% if active=='upload'     %}active{% endif %}">Upload</a>
+      <a href="/contact"     class="{% if active=='contact'    %}active{% endif %}">Contact</a>
+      <a href="/components"  class="{% if active=='components' %}active{% endif %}">Components</a>
+    </nav>
+    <div class="sidebar-foot">
+      <p>Mock data · in memory</p>
+      <p class="muted">{{ now }}</p>
+    </div>
+  </aside>
+
+  <main class="content">
+    <header class="topbar">
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div class="topbar-right">
+        <input type="search" placeholder="Search…" class="topbar-search" />
+        <button class="avatar" title="Account">AL</button>
+      </div>
+    </header>
+
+    <div class="page">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <!-- Toast container -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    // Lightweight toast helper, driven by ?flag=1 query params.
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3200);
+    }
+
+    // Generic modal open/close via data attributes.
+    document.addEventListener("click", (e) => {
+      const opener = e.target.closest("[data-modal-open]");
+      if (opener) {
+        const m = document.getElementById(opener.dataset.modalOpen);
+        if (m) m.classList.add("open");
+      }
+      const closer = e.target.closest("[data-modal-close]");
+      if (closer) {
+        const m = closer.closest(".modal-backdrop");
+        if (m) m.classList.remove("open");
+      }
+      if (e.target.classList.contains("modal-backdrop")) {
+        e.target.classList.remove("open");
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        document.querySelectorAll(".modal-backdrop.open")
+          .forEach((m) => m.classList.remove("open"));
+      }
+    });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set active = "upload" %}
+{% block title %}Upload{% endblock %}
+{% block heading %}Upload{% endblock %}
+
+{% block content %}
+  <section class="grid two-col">
+    <div class="card">
+      <h2>Upload a file</h2>
+      <p class="lede">Files aren't stored on disk — we just record their metadata.</p>
+      <form method="post" action="/upload" enctype="multipart/form-data" id="uploadForm">
+        <label>Optional label
+          <input name="label" placeholder="Give this file a friendly name" />
+        </label>
+        <label>File
+          <input name="file" type="file" required id="fileInput" />
+        </label>
+        <p class="muted" id="fileHint">No file selected.</p>
+        <div class="row">
+          <button class="btn primary" type="submit">Upload</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card no-pad">
+      <div class="card-head"><h2>Uploaded files</h2></div>
+      <table class="table">
+        <thead>
+          <tr><th>Name</th><th>Type</th><th>Size</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          {% for u in uploads %}
+            <tr>
+              <td><strong>{{ u.filename }}</strong><br /><span class="muted mono">{{ u.id }}</span></td>
+              <td><span class="pill">{{ u.content_type }}</span></td>
+              <td>{{ u.size }} B</td>
+              <td class="muted">{{ u.uploaded }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">Nothing uploaded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const input = document.getElementById("fileInput");
+  const hint = document.getElementById("fileHint");
+  input.addEventListener("change", () => {
+    hint.textContent = input.files.length
+      ? `Selected: ${input.files[0].name} (${input.files[0].size} B)`
+      : "No file selected.";
+  });
+  if (new URLSearchParams(location.search).get("uploaded")) showToast("File uploaded ✓");
+</script>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set active = "contact" %}
+{% block title %}Contact{% endblock %}
+{% block heading %}Contact{% endblock %}
+
+{% block content %}
+  <section class="grid two-col">
+    <div class="card">
+      <h2>Send us a message</h2>
+      <p class="lede">A form with text fields, a select, a textarea and a checkbox.</p>
+      <form method="post" action="/contact">
+        <div class="field-row">
+          <label>Name
+            <input name="name" required placeholder="Your name" />
+          </label>
+          <label>Email
+            <input name="email" type="email" required placeholder="you@example.com" />
+          </label>
+        </div>
+        <label>Topic
+          <select name="topic">
+            <option value="general">General</option>
+            <option value="billing">Billing</option>
+            <option value="bug">Bug report</option>
+            <option value="feature">Feature request</option>
+          </select>
+        </label>
+        <label>Message
+          <textarea name="body" rows="5" required placeholder="How can we help?"></textarea>
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" name="subscribe" value="on" />
+          Subscribe me to product updates
+        </label>
+        <div class="row">
+          <button class="btn primary" type="submit">Send message</button>
+          <button class="btn ghost" type="reset">Reset</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Inbox</h2>
+      <ul class="messages">
+        {% for m in messages %}
+          <li>
+            <div class="msg-head">
+              <strong>{{ m.name }}</strong>
+              <span class="pill">{{ m.topic }}</span>
+            </div>
+            <p class="muted mono">{{ m.email }} · {{ m.created }}</p>
+            <p>{{ m.body }}</p>
+          </li>
+        {% else %}
+          <li class="empty">No messages yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  if (new URLSearchParams(location.search).get("sent")) showToast("Message sent ✓");
+</script>
+{% endblock %}

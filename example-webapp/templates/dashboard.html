@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+
+{% block content %}
+  <section class="grid stats">
+    <div class="card stat">
+      <span class="stat-label">Projects</span>
+      <span class="stat-value">{{ stats.projects }}</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">Active</span>
+      <span class="stat-value">{{ stats.active }}</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">Uploads</span>
+      <span class="stat-value">{{ stats.uploads }}</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">Messages</span>
+      <span class="stat-value">{{ stats.messages }}</span>
+    </div>
+  </section>
+
+  <section class="grid two-col">
+    <div class="card">
+      <h2>Welcome back, Ada</h2>
+      <p class="lede">
+        This is a fully mocked console. Every number, row and file lives only in
+        memory — refresh-safe, restart-resets. Use it to poke at forms, popups,
+        uploads and multi-page navigation.
+      </p>
+      <p>
+        Open the <a href="/projects">Projects</a> page in a second tab while you
+        fill out the <a href="/contact">Contact</a> form here, and watch the two
+        views stay independent.
+      </p>
+      <div class="row">
+        <button class="btn primary" data-modal-open="tipModal">Show a tip</button>
+        <a class="btn ghost" href="/components">Browse components →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent projects</h2>
+      <ul class="feed">
+        {% for p in projects[:4] %}
+          <li>
+            <span class="badge {{ p.status }}">{{ p.status }}</span>
+            <strong>{{ p.name }}</strong>
+            <span class="muted">{{ p.owner }}</span>
+            <div class="bar"><div class="bar-fill" style="width: {{ p.progress }}%"></div></div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+
+  <!-- Modal / popup -->
+  <div class="modal-backdrop" id="tipModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tipTitle">
+      <h3 id="tipTitle">💡 Pro tip</h3>
+      <p>
+        You can open any page in a new browser tab and operate on each one in
+        parallel. State is shared on the server, so an upload in one tab shows up
+        when you refresh another.
+      </p>
+      <div class="row end">
+        <button class="btn" data-modal-close>Got it</button>
+      </div>
+    </div>
+  </div>
+{% endblock %}

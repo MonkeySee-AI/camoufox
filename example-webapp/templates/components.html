@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% set active = "components" %}
+{% block title %}Components{% endblock %}
+{% block heading %}Component gallery{% endblock %}
+
+{% block content %}
+  <p class="lede">A grab-bag of UI bits an automation agent might need to recognize.</p>
+
+  <section class="grid two-col">
+    <div class="card">
+      <h2>Buttons</h2>
+      <div class="row wrap">
+        <button class="btn primary">Primary</button>
+        <button class="btn">Default</button>
+        <button class="btn ghost">Ghost</button>
+        <button class="btn danger">Danger</button>
+        <button class="btn" disabled>Disabled</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Badges &amp; pills</h2>
+      <div class="row wrap">
+        <span class="badge active">active</span>
+        <span class="badge paused">paused</span>
+        <span class="badge archived">archived</span>
+        <span class="pill">label</span>
+        <span class="pill">v2.1.0</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Text blocks</h2>
+      <h3>Heading three</h3>
+      <p>
+        Regular paragraph text with a <a href="#">link</a>, some
+        <strong>bold</strong> and <em>italic</em> emphasis, plus
+        <code>inline code</code>.
+      </p>
+      <blockquote>“A quoted block of text for good measure.”</blockquote>
+      <ul>
+        <li>First list item</li>
+        <li>Second list item</li>
+        <li>Third list item</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Inputs</h2>
+      <label>Text<input placeholder="Type here" /></label>
+      <label>Select
+        <select>
+          <option>Option A</option>
+          <option>Option B</option>
+        </select>
+      </label>
+      <label class="checkbox"><input type="checkbox" checked /> Checked box</label>
+      <label class="checkbox"><input type="radio" name="r" checked /> Radio one</label>
+      <label class="checkbox"><input type="radio" name="r" /> Radio two</label>
+      <label>Range<input type="range" min="0" max="100" value="40" /></label>
+    </div>
+
+    <div class="card">
+      <h2>Alerts</h2>
+      <div class="alert info">ℹ️ This is an informational note.</div>
+      <div class="alert success">✓ Everything worked.</div>
+      <div class="alert warning">⚠️ Heads up, double-check this.</div>
+      <div class="alert error">✕ Something went wrong.</div>
+    </div>
+
+    <div class="card">
+      <h2>Popups</h2>
+      <p>Trigger overlays of different kinds.</p>
+      <div class="row wrap">
+        <button class="btn primary" data-modal-open="galleryModal">Open modal</button>
+        <button class="btn" onclick="showToast('Hello from a toast 👋')">Fire toast</button>
+        <details class="disclosure">
+          <summary>Expandable section</summary>
+          <p>Hidden content revealed on click — a native disclosure widget.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <div class="modal-backdrop" id="galleryModal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Example modal</h3>
+      <p>This dialog dims the page behind it. Click the backdrop, press Esc, or use the button to dismiss.</p>
+      <div class="row end">
+        <button class="btn primary" data-modal-close>Close</button>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set active = "projects" %}
+{% block title %}Projects{% endblock %}
+{% block heading %}Projects{% endblock %}
+
+{% block content %}
+  <div class="row between">
+    <p class="lede">{{ projects|length }} projects in memory.</p>
+    <button class="btn primary" data-modal-open="newProjectModal">+ New project</button>
+  </div>
+
+  <div class="card no-pad">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Owner</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in projects %}
+          <tr>
+            <td><strong>{{ p.name }}</strong><br /><span class="muted mono">{{ p.id }}</span></td>
+            <td>{{ p.owner }}</td>
+            <td><span class="badge {{ p.status }}">{{ p.status }}</span></td>
+            <td>
+              <div class="bar small"><div class="bar-fill" style="width: {{ p.progress }}%"></div></div>
+              <span class="muted">{{ p.progress }}%</span>
+            </td>
+            <td class="muted">{{ p.created }}</td>
+            <td>
+              <form method="post" action="/projects/{{ p.id }}/delete">
+                <button class="btn danger small" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="empty">No projects yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- New project modal with a small form -->
+  <div class="modal-backdrop" id="newProjectModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="npTitle">
+      <h3 id="npTitle">New project</h3>
+      <form method="post" action="/projects/new">
+        <label>Name
+          <input name="name" required placeholder="e.g. Pulsar Reports" />
+        </label>
+        <label>Owner
+          <input name="owner" required placeholder="e.g. Ada Lovelace" />
+        </label>
+        <div class="field-row">
+          <label>Status
+            <select name="status">
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <label>Progress (%)
+            <input name="progress" type="number" min="0" max="100" value="0" />
+          </label>
+        </div>
+        <div class="row end">
+          <button class="btn ghost" type="button" data-modal-close>Cancel</button>
+          <button class="btn primary" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get("created")) showToast("Project created ✓");
+  if (params.get("deleted")) showToast("Project deleted ✓");
+</script>
+{% endblock %}
