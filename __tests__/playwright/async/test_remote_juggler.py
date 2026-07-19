@@ -135,10 +135,15 @@ async def test_should_connect_over_remote_juggler_port(
             <main>
               <h1>Remote Juggler connected</h1>
               <button>Mark clicked</button>
+              <pre id="async-stack">waiting</pre>
               <script>
                 document.querySelector("button").addEventListener("click", () => {
                   document.body.setAttribute("data-clicked", "yes");
                 });
+                Promise.resolve().then(() => setTimeout(() => {
+                  document.querySelector("#async-stack").textContent =
+                    new Error("fingerprint-probe").stack;
+                }, 0));
               </script>
             </main>
         """
@@ -147,6 +152,16 @@ async def test_should_connect_over_remote_juggler_port(
         await expect(page.locator("h1")).to_have_text("Remote Juggler connected")
         await page.locator("button").click()
         await expect(page.locator("body")).to_have_attribute("data-clicked", "yes")
+
+        # A page-owned async chain reproduces Fingerprint's debugger probe; Juggler
+        # must not add debugger-maintained parent frames to the content-visible stack.
+        stack = page.locator("#async-stack")
+        await expect(stack).not_to_have_text("waiting")
+        assert not re.search(
+            r"^(?:promise callback|setTimeout handler)\*",
+            await stack.inner_text(),
+            re.M,
+        )
         assert len(await page.screenshot()) > 0
 
         await browser.close()

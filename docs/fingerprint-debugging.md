@@ -148,10 +148,9 @@ baseline:                         developer_tools: true,  suspect_score: 9
 javascript.options.asyncstack=0:  developer_tools: false, suspect_score: 0
 ```
 
-The launcher default should set `javascript.options.asyncstack` to `false`.
-Callers can still override it explicitly through `firefox_user_prefs`, but the
-default should match a normal non-debugged page where async debugger stack
-capture is not visible to page JavaScript.
+The browser default should set `javascript.options.asyncstack` to `false` so
+neutral executable launches are covered too. Callers can still override it
+explicitly through `firefox_user_prefs`.
 
 ## PixelScan Masking Finding
 
