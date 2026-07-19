@@ -49,4 +49,14 @@ Or through the repo `Makefile`:
 make tests headful=true
 ```
 
+Compare Rotunda's page-visible global keys, descriptors, prototype chain, and
+async-stack markers with a stock Firefox from the same source version:
+
+```bash
+STOCK_FIREFOX_EXECUTABLE_PATH=/Applications/Firefox.app/Contents/MacOS/firefox \
+ROTUNDA_EXECUTABLE_PATH=/path/to/rotunda \
+  uv run --group dev --group playwright-tests pytest --integration \
+  __tests__/playwright/async/test_firefox_global_parity.py
+```
+
 ---

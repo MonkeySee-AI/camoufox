@@ -395,6 +395,7 @@ class FirefoxFingerprintCompiler:
             "setFontList",
             "setSpeechVoices",
             "setWebRTCIPv4",
+            "setWebRTCIPv6",
         ):
             lines.append(f"  try {{ w.{setter} = undefined; delete w.{setter}; }} catch (e) {{}}")
 

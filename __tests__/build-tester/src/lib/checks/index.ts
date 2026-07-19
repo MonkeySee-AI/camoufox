@@ -11,13 +11,17 @@ const SELF_DESTRUCT_FUNCTIONS = [
   "setAudioFingerprintSeed",
   "setTimezone",
   "setScreenDimensions",
+  "setScreenAvailableRect",
   "setScreenColorDepth",
+  "setWindowDimensions",
   "setNavigatorPlatform",
   "setNavigatorOscpu",
   "setNavigatorHardwareConcurrency",
+  "setNavigatorUserAgent",
   "setFontList",
   "setSpeechVoices",
   "setWebRTCIPv4",
+  "setWebRTCIPv6",
 ];
 
 function runSelfDestructChecks(): Record<string, CheckResult> {
