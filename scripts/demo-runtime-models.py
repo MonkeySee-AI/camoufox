@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIR = ROOT / "rotunda-150.0.1-beta.25"
+SOURCE_DIR = ROOT / "rotunda-152.0.6-beta.25"
 BROWSERBUILD_DIR = ROOT / "browserbuild"
 DEFAULT_MOUSE_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "mouse.safetensors"
 DEFAULT_KEYBOARD_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "keyboard.safetensors"

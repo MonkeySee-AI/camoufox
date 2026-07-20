@@ -1,11 +1,11 @@
+diff --git a/browser/components/preferences/main.js b/browser/components/preferences/main.js
+index c86e54b..0d60d38 100644
 --- a/browser/components/preferences/main.js
 +++ b/browser/components/preferences/main.js
-@@ -1517,208 +1517,8 @@
-   visible: ({ enableDeletePrivate }) => enableDeletePrivate.value,
-   onUserChange() {
-     Services.prefs.setBoolPref("browser.download.deletePrivate.chosen", true);
--  },
--});
+@@ -353,206 +353,6 @@ Preferences.addSetting({
+   },
+ });
+ 
 -/**
 - * A helper object containing all logic related to
 - * setting the browser as the user's default.
@@ -144,7 +144,7 @@
 -       */
 -      !gGIOService?.isRunningUnderFlatpak
 -    );
-   },
+-  },
 -};
 -
 -Preferences.addSetting({
@@ -167,7 +167,7 @@
 -    !DefaultBrowserHelper.canCheck ||
 -    setting.locked ||
 -    DefaultBrowserHelper.isBrowserDefault,
- });
+-});
 -
 -Preferences.addSetting({
 -  id: "isDefaultPane",
@@ -206,14 +206,13 @@
 -  },
 -});
 -
- // Firefox support settings
+ // AI Control pref settings
  Preferences.addSetting({
-   id: "supportLinksGroup",
-@@ -2606,47 +2406,6 @@
-     }
-   }
- );
--
+   id: "aiControlDefault",
+@@ -583,56 +383,6 @@ Preferences.addSetting({
+   pref: "browser.ai.control.smartWindow",
+ });
+ 
 -function createDefaultBrowserConfig({
 -  includeIsDefaultPane = true,
 -  inProgress = false,
@@ -223,6 +222,10 @@
 -    id: "isDefaultPane",
 -    l10nId: "is-default-browser-2",
 -    control: "moz-promo",
+-    controlAttrs: {
+-      imagesrc: "chrome://global/skin/illustrations/kit-happy.svg",
+-      imagedisplay: "cover",
+-    },
 -  };
 -
 -  const isNotDefaultPane = {
@@ -235,11 +238,16 @@
 -        l10nId: "set-as-my-default-browser-2",
 -        id: "setDefaultButton",
 -        slot: "actions",
+-
 -        controlAttrs: {
 -          type: "primary",
 -        },
 -      },
 -    ],
+-    controlAttrs: {
+-      imagesrc: "chrome://global/skin/illustrations/kit-concerned.svg",
+-      imagedisplay: "cover",
+-    },
 -  };
 -
 -  const items = includeIsDefaultPane
@@ -254,45 +262,32 @@
 -    ...(hiddenFromSearch && { hiddenFromSearch }),
 -  };
 -}
- 
+-
  function createStartupConfig(hidden = false) {
    return {
-@@ -2687,10 +2446,6 @@
-         id: "windowsLaunchOnLoginDisabledProfileBox",
-         control: "moz-message-bar",
-         l10nId: "startup-windows-launch-on-login-profile-disabled",
--      },
+     l10nId: "startup-group",
+@@ -679,16 +429,11 @@ function createStartupConfig(hidden = false) {
+           role: "status",
+         },
+       },
 -      {
 -        id: "alwaysCheckDefault",
 -        l10nId: "always-check-default",
-       },
+-      },
      ],
    };
-@@ -2753,7 +2508,6 @@
-       },
-     ],
-   },
+ }
+ 
+ SettingGroupManager.registerGroups({
 -  defaultBrowser: createDefaultBrowserConfig(),
    startup: createStartupConfig(
-     Services.prefs.getBoolPref("browser.settings-redesign.enabled", false)
+     Services.prefs.getBoolPref("browser-settings-redesign.enabled", false)
    ),
-@@ -4627,11 +4381,6 @@
-       },
-     ],
-   },
--  defaultBrowserSync: createDefaultBrowserConfig({
--    includeIsDefaultPane: false,
--    inProgress: true,
--    hiddenFromSearch: true,
--  }),
-   sync: {
-     inProgress: true,
-     l10nId: "sync-group-label",
-@@ -5215,7 +4964,6 @@
+@@ -797,7 +542,6 @@ var gMainPane = {
      initSettingGroup("translations");
      initSettingGroup("spellCheck");
      initSettingGroup("performance");
 -    initSettingGroup("defaultBrowser");
      initSettingGroup("startup");
      initSettingGroup("importBrowserData");
-     initSettingGroup("networkProxy");
+     initSettingGroup("tabs");

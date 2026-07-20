@@ -8,7 +8,7 @@ uses those saved persona files for both verification rounds. That keeps the
 persona JSON files as the source of truth for browser identity over time.
 
 Example:
-    export ROTUNDA_EXECUTABLE_PATH="$PWD/rotunda-150.0.1-beta.25/obj-aarch64-apple-darwin/dist/Rotunda.app/Contents/MacOS/rotunda"
+    export ROTUNDA_EXECUTABLE_PATH="$PWD/rotunda-152.0.6-beta.25/obj-aarch64-apple-darwin/dist/Rotunda.app/Contents/MacOS/rotunda"
     uv run --group dev python example/persona_consistency.py
 """
 
