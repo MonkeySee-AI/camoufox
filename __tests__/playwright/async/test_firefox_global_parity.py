@@ -19,6 +19,9 @@ from .test_remote_juggler import _launch_remote_juggler, _terminate_process
 
 _PROBE_HTML = rb"""<!doctype html><meta charset="utf-8"><script>
 (() => {
+  const functionSource = value => typeof value === "function"
+    ? Function.prototype.toString.call(value)
+    : null;
   const describe = object => Reflect.ownKeys(object).map(key => {
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
     const value = descriptor && "value" in descriptor ? descriptor.value : undefined;
@@ -27,31 +30,94 @@ _PROBE_HTML = rb"""<!doctype html><meta charset="utf-8"><script>
       configurable: descriptor ? descriptor.configurable : null,
       enumerable: descriptor ? descriptor.enumerable : null,
       kind: descriptor && "value" in descriptor ? "data" : "accessor",
+      writable: descriptor && "value" in descriptor ? descriptor.writable : null,
       valueType: descriptor && "value" in descriptor ? typeof value : null,
       functionName: typeof value === "function" ? value.name : null,
       functionLength: typeof value === "function" ? value.length : null,
+      functionSource: functionSource(value),
       getterType: descriptor && !("value" in descriptor) ? typeof descriptor.get : null,
       setterType: descriptor && !("value" in descriptor) ? typeof descriptor.set : null,
+      getterSource: descriptor && !("value" in descriptor)
+        ? functionSource(descriptor.get) : null,
+      setterSource: descriptor && !("value" in descriptor)
+        ? functionSource(descriptor.set) : null,
     };
   });
-
-  Promise.resolve().then(() => setTimeout(async () => {
+  const describeValue = value => {
+    if (value === null || value === undefined)
+      return {type: typeof value, tag: String(value), prototypeChain: []};
+    const boxed = Object(value);
     const prototypeChain = [];
-    for (let current = window; current; current = Object.getPrototypeOf(current)) {
+    for (let current = boxed; current; current = Object.getPrototypeOf(current)) {
       prototypeChain.push({
         tag: Object.prototype.toString.call(current),
         properties: describe(current),
       });
     }
-    const stack = new Error("firefox-global-parity").stack || "";
-    const asyncParentFrames = stack.split("\n")
-      .filter(line => /^(?:promise callback|setTimeout handler)\*/.test(line))
-      .map(line => line.split("@", 1)[0]);
+    return {type: typeof value, tag: Object.prototype.toString.call(value), prototypeChain};
+  };
+  const normalizeStack = stack => String(stack || "")
+    .replace(/browser=(?:stock|rotunda)/g, "browser=firefox");
+  const describeError = error => ({
+    name: error.name,
+    message: error.message,
+    string: Error.prototype.toString.call(error),
+    stack: normalizeStack(error.stack),
+    value: describeValue(error),
+  });
+
+  Promise.resolve().then(() => setTimeout(async () => {
+    const windowPrototypeChain = [];
+    for (let current = window; current; current = Object.getPrototypeOf(current)) {
+      windowPrototypeChain.push({
+        tag: Object.prototype.toString.call(current),
+        properties: describe(current),
+      });
+    }
+    const samples = {
+      undefined,
+      null: null,
+      boolean: false,
+      number: 1,
+      bigint: 1n,
+      string: "rotunda",
+      symbol: Symbol("rotunda"),
+      object: {},
+      array: [1],
+      function: function sample(value) { return value; },
+      date: new Date(0),
+      regexp: /rotunda/gi,
+      promise: Promise.resolve(1),
+      map: new Map([["key", "value"]]),
+      set: new Set(["value"]),
+      arrayBuffer: new ArrayBuffer(8),
+      uint8Array: new Uint8Array(1),
+      url: new URL("https://example.test/path"),
+      event: new Event("rotunda"),
+      domException: new DOMException("rotunda", "InvalidStateError"),
+    };
+    const runtimeObjects = Object.fromEntries(Object.entries(samples)
+      .map(([name, value]) => [name, describeValue(value)]));
+    const synchronousError = (() => {
+      function leaf() { return new Error("firefox-global-parity"); }
+      return describeError(leaf());
+    })();
+    const asynchronousError = describeError(new Error("firefox-global-parity-async"));
+    let invalidFunctionCall;
+    try {
+      Function.prototype.toString.call(null);
+    } catch (error) {
+      invalidFunctionCall = describeError(error);
+    }
     const browser = new URL(location.href).searchParams.get("browser");
     await fetch(`/report?browser=${encodeURIComponent(browser)}`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({prototypeChain, asyncParentFrames}),
+      body: JSON.stringify({
+        windowPrototypeChain,
+        runtimeObjects,
+        errors: {synchronousError, asynchronousError, invalidFunctionCall},
+      }),
     });
   }, 0));
 })();
@@ -166,8 +232,8 @@ async def _capture_rotunda(
 
 def _surface_diff(stock: dict[str, Any], rotunda: dict[str, Any]) -> dict[str, Any]:
     diff: dict[str, Any] = {}
-    stock_chain = stock["prototypeChain"]
-    rotunda_chain = rotunda["prototypeChain"]
+    stock_chain = stock["windowPrototypeChain"]
+    rotunda_chain = rotunda["windowPrototypeChain"]
     if len(stock_chain) != len(rotunda_chain):
         diff["prototypeChainLength"] = [len(stock_chain), len(rotunda_chain)]
     for index, (stock_level, rotunda_level) in enumerate(
@@ -192,16 +258,14 @@ def _surface_diff(stock: dict[str, Any], rotunda: dict[str, Any]) -> dict[str, A
         if changed:
             level_diff["changedDescriptors"] = changed
         if level_diff:
-            diff[f"prototypeChain[{index}]"] = level_diff
-    if stock["asyncParentFrames"] != rotunda["asyncParentFrames"]:
-        diff["asyncParentFrames"] = [
-            stock["asyncParentFrames"],
-            rotunda["asyncParentFrames"],
-        ]
+            diff[f"windowPrototypeChain[{index}]"] = level_diff
+    for surface in ("runtimeObjects", "errors"):
+        if stock[surface] != rotunda[surface]:
+            diff[surface] = [stock[surface], rotunda[surface]]
     return diff
 
 
-async def test_rotunda_page_globals_match_stock_firefox(
+async def test_rotunda_javascript_surface_matches_stock_firefox(
     playwright: Playwright,
     tmp_path: Path,
 ) -> None:
@@ -232,7 +296,7 @@ async def test_rotunda_page_globals_match_stock_firefox(
         )
 
     diff = _surface_diff(reports["stock"], reports["rotunda"])
-    assert not diff, "Page-visible Firefox global mismatch:\n" + json.dumps(
+    assert not diff, "Page-visible Firefox JavaScript surface mismatch:\n" + json.dumps(
         diff,
         indent=2,
         sort_keys=True,

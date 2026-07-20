@@ -49,8 +49,9 @@ Or through the repo `Makefile`:
 make tests headful=true
 ```
 
-Compare Rotunda's page-visible global keys, descriptors, prototype chain, and
-async-stack markers with a stock Firefox from the same source version:
+Compare Rotunda's page-visible globals, built-in object/prototype descriptors,
+native function definitions, and error stacks with stock Firefox from the same
+source version:
 
 ```bash
 STOCK_FIREFOX_EXECUTABLE_PATH=/Applications/Firefox.app/Contents/MacOS/firefox \
