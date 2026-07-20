@@ -182,6 +182,12 @@ async def _capture_stock_firefox(
     event: threading.Event,
 ) -> None:
     profile_dir.mkdir()
+    # Match Rotunda's intentional feature policy so this comparison isolates
+    # JavaScript changes introduced by Rotunda rather than configured product behavior.
+    (profile_dir / "user.js").write_text(
+        'user_pref("dom.documentpip.enabled", false);\n'
+        'user_pref("dom.webserial.enabled", false);\n'
+    )
     process = await asyncio.create_subprocess_exec(
         executable,
         "--headless",

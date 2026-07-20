@@ -592,7 +592,6 @@ jobs:
         run: |
           .venv/bin/python -m pytest \
             --integration \
-            --headless \
             __tests__/build-tester/test_remote_juggler.py
 
   publish-python-package:
