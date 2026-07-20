@@ -1,8 +1,271 @@
+diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
+new file mode 100644
+index 0000000..8834c93
+--- /dev/null
++++ b/dom/base/WebRTCIPManager.cpp
+@@ -0,0 +1,146 @@
++#include "WebRTCIPManager.h"
++#include "nsTHashMap.h"
++#include "RoverfoxStorageManager.h"
++#include "nsPrintfCString.h"
++#include "nsGlobalWindowInner.h"
++#include "nsDocShell.h"
++#include "xpcpublic.h"
++#include "mozilla/dom/BrowsingContext.h"
++#include "mozilla/dom/Document.h"
++#include "nsPIDOMWindow.h"
++
++namespace mozilla {
++namespace dom {
++
++/* static */ nsString
++WebRTCIPManager::IPv4KeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_ipv4_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ nsString
++WebRTCIPManager::IPv6KeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_ipv6_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ nsString
++WebRTCIPManager::IPv4DisabledKeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_ipv4_disabled_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ nsString
++WebRTCIPManager::IPv6DisabledKeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_ipv6_disabled_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++
++
++/* static */ void
++WebRTCIPManager::SetIPv4(uint32_t userContextId, const nsAString& ipv4) {
++  nsString key = IPv4KeyForUserContext(userContextId);
++  RoverfoxStorageManager::PutString(key, ipv4);
++
++  // Mark the function as disabled for this context after first use
++  DisableIPv4Function(userContextId);
++}
++
++/* static */ bool
++WebRTCIPManager::GetIPv4(uint32_t userContextId, nsAString& outIPv4) {
++  nsString key = IPv4KeyForUserContext(userContextId);
++  return RoverfoxStorageManager::GetString(key, outIPv4);
++}
++
++/* static */ void
++WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
++  nsString key = IPv6KeyForUserContext(userContextId);
++  RoverfoxStorageManager::PutString(key, ipv6);
++
++  // Mark the function as disabled for this context after first use
++  DisableIPv6Function(userContextId);
++}
++
++/* static */ bool
++WebRTCIPManager::GetIPv6(uint32_t userContextId, nsAString& outIPv6) {
++  nsString key = IPv6KeyForUserContext(userContextId);
++  return RoverfoxStorageManager::GetString(key, outIPv6);
++}
++
++
++
++/* static */ bool
++WebRTCIPManager::IsIPv4FunctionDisabled(uint32_t userContextId) {
++  nsString key = IPv4DisabledKeyForUserContext(userContextId);
++  bool disabled = false;
++  return RoverfoxStorageManager::GetBool(key, disabled) && disabled;
++}
++
++/* static */ void
++WebRTCIPManager::DisableIPv4Function(uint32_t userContextId) {
++  nsString key = IPv4DisabledKeyForUserContext(userContextId);
++  RoverfoxStorageManager::PutBool(key, true);
++}
++
++/* static */ bool
++WebRTCIPManager::IsIPv6FunctionDisabled(uint32_t userContextId) {
++  nsString key = IPv6DisabledKeyForUserContext(userContextId);
++  bool disabled = false;
++  return RoverfoxStorageManager::GetBool(key, disabled) && disabled;
++}
++
++/* static */ void
++WebRTCIPManager::DisableIPv6Function(uint32_t userContextId) {
++  nsString key = IPv6DisabledKeyForUserContext(userContextId);
++  RoverfoxStorageManager::PutBool(key, true);
++}
++
++
++
++/* static */ bool
++WebRTCIPManager::IsIPv4FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
++  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
++  if (!win) {
++    return false;
++  }
++
++  uint32_t userContextId = 0;
++  if (BrowsingContext* bc = win->GetBrowsingContext()) {
++    userContextId = bc->OriginAttributesRef().mUserContextId;
++  }
++
++  bool disabled = false;
++  RoverfoxStorageManager::GetBool(IPv4DisabledKeyForUserContext(userContextId), disabled);
++  return !disabled;
++}
++
++/* static */ bool
++WebRTCIPManager::IsIPv6FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
++  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
++  if (!win) {
++    return false;
++  }
++
++  uint32_t userContextId = 0;
++  if (BrowsingContext* bc = win->GetBrowsingContext()) {
++    userContextId = bc->OriginAttributesRef().mUserContextId;
++  }
++
++  bool disabled = false;
++  RoverfoxStorageManager::GetBool(IPv6DisabledKeyForUserContext(userContextId), disabled);
++  return !disabled;
++}
++
++
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
+new file mode 100644
+index 0000000..c9810a0
+--- /dev/null
++++ b/dom/base/WebRTCIPManager.h
+@@ -0,0 +1,105 @@
++#ifndef mozilla_dom_WebRTCIPManager_h
++#define mozilla_dom_WebRTCIPManager_h
++
++#include "js/TypeDecls.h"
++#include "nsString.h"
++
++namespace mozilla {
++namespace dom {
++
++/**
++ * WebRTCIPManager manages WebRTC IP addresses per user context.
++ * This enables privacy-preserving WebRTC IP spoofing by allowing deterministic
++ * IP address overrides that are isolated by user context.
++ */
++class WebRTCIPManager {
++public:
++  /**
++   * Set the WebRTC IPv4 address for a given user context.
++   * @param userContextId The user context ID (0 for default context)
++   * @param ipv4 The IPv4 address to use for WebRTC connections
++   */
++  static void SetIPv4(uint32_t userContextId, const nsAString& ipv4);
++
++  /**
++   * Get the WebRTC IPv4 address for a given user context.
++   * @param userContextId The user context ID
++   * @param outIPv4 The IPv4 address, empty if no address has been set
++   * @return true if an IPv4 address has been set, false otherwise
++   */
++  static bool GetIPv4(uint32_t userContextId, nsAString& outIPv4);
++
++  /**
++   * Set the WebRTC IPv6 address for a given user context.
++   * @param userContextId The user context ID (0 for default context)
++   * @param ipv6 The IPv6 address to use for WebRTC connections
++   */
++  static void SetIPv6(uint32_t userContextId, const nsAString& ipv6);
++
++  /**
++   * Get the WebRTC IPv6 address for a given user context.
++   * @param userContextId The user context ID
++   * @param outIPv6 The IPv6 address, empty if no address has been set
++   * @return true if an IPv6 address has been set, false otherwise
++   */
++  static bool GetIPv6(uint32_t userContextId, nsAString& outIPv6);
++
++
++
++  /**
++   * Check if the setWebRTCIPv4 function has been used and should be disabled for a context.
++   * @param userContextId The user context ID
++   * @return true if the function has been used for this context and should not appear on new windows
++   */
++  static bool IsIPv4FunctionDisabled(uint32_t userContextId);
++
++  /**
++   * Mark the setWebRTCIPv4 function as used/disabled for a context.
++   * @param userContextId The user context ID
++   */
++  static void DisableIPv4Function(uint32_t userContextId);
++
++  /**
++   * Check if the setWebRTCIPv6 function has been used and should be disabled for a context.
++   * @param userContextId The user context ID
++   * @return true if the function has been used for this context and should not appear on new windows
++   */
++  static bool IsIPv6FunctionDisabled(uint32_t userContextId);
++
++  /**
++   * Mark the setWebRTCIPv6 function as used/disabled for a context.
++   * @param userContextId The user context ID
++   */
++  static void DisableIPv6Function(uint32_t userContextId);
++
++
++
++  /**
++   * WebIDL-compatible function to check if setWebRTCIPv4 should be enabled.
++   * @param aCx The JavaScript context
++   * @param aObj The JavaScript object (window)
++   * @return true if the function should be enabled, false otherwise
++   */
++  static bool IsIPv4FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj);
++
++  /**
++   * WebIDL-compatible function to check if setWebRTCIPv6 should be enabled.
++   * @param aCx The JavaScript context
++   * @param aObj The JavaScript object (window)
++   * @return true if the function should be enabled, false otherwise
++   */
++  static bool IsIPv6FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj);
++
++
++
++private:
++  static nsString IPv4KeyForUserContext(uint32_t userContextId);
++  static nsString IPv6KeyForUserContext(uint32_t userContextId);
++  static nsString IPv4DisabledKeyForUserContext(uint32_t userContextId);
++  static nsString IPv6DisabledKeyForUserContext(uint32_t userContextId);
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_WebRTCIPManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 5846b92..4d48670 100644
+index 9f014c9..2649af4 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -297,10 +297,15 @@ EXPORTS.mozilla.dom += [
+@@ -297,6 +297,7 @@ EXPORTS.mozilla.dom += [
      "VideoFrameProvider.h",
      "ViewportMetaData.h",
      "VisualViewport.h",
@@ -10,14 +273,17 @@ index 5846b92..4d48670 100644
      "WindowFeatures.h",
      "WindowProxyHolder.h",
  ]
+@@ -337,6 +338,10 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
+ # alphabetically-later files like BarProps.cpp)
+ SOURCES += ["AudioFingerprintManager.cpp"]
  
 +# WebRTCIPManager compiled separately to avoid unified build errors
 +# (it includes RoverfoxStorageManager.h which causes template issues)
 +SOURCES += ["WebRTCIPManager.cpp"]
 +
- # AudioFingerprintManager compiled separately to avoid namespace pollution
- # in unified builds (it includes RoverfoxStorageManager.h which can affect
- # alphabetically-later files like BarProps.cpp)
+ UNIFIED_SOURCES += [
+     "!UseCounterMetrics.cpp",
+     "AbstractRange.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
 index e564fff..0094967 100644
 --- a/dom/base/nsGlobalWindowInner.cpp

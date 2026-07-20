@@ -163,9 +163,9 @@ index cd9090cda3..a1b2c3d4e5 100644
      "AutoPrintEventDispatcher.h",
      "AutoSuppressEventHandlingAndSuspend.h",
      "BarProps.h",
-@@ -326,4 +326,9 @@ SOURCES += [
-     "nsWindowSizes.cpp",
- ]
+@@ -328,6 +329,11 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
+         inputs=["fragmentdirectives"],
+     )
  
 +# AudioFingerprintManager compiled separately to avoid namespace pollution
 +# in unified builds (it includes RoverfoxStorageManager.h which can affect
@@ -173,6 +173,8 @@ index cd9090cda3..a1b2c3d4e5 100644
 +SOURCES += ["AudioFingerprintManager.cpp"]
 +
  UNIFIED_SOURCES += [
+     "!UseCounterMetrics.cpp",
+     "AbstractRange.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
 index 748ae6cf83..b2c3d4e5f6 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
