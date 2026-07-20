@@ -102,6 +102,9 @@ function rotundaRuntimeInitScripts() {
   if (timezone)
     call('setTimezone', timezone);
 
+  if (lines.length === 2)
+    return '';
+
   for (const setter of [
     'setFontSpacingSeed',
     'setAudioFingerprintSeed',

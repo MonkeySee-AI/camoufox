@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import sys
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -275,8 +274,6 @@ async def test_rotunda_javascript_surface_matches_stock_firefox(
         pytest.skip("Firefox parity requires --integration.")
     rotunda = os.getenv("ROTUNDA_EXECUTABLE_PATH")
     stock = os.getenv("STOCK_FIREFOX_EXECUTABLE_PATH")
-    if not stock and sys.platform == "darwin":
-        stock = "/Applications/Firefox.app/Contents/MacOS/firefox"
     if not rotunda or not Path(rotunda).is_file():
         pytest.skip("Global parity requires ROTUNDA_EXECUTABLE_PATH.")
     if not stock or not Path(stock).is_file():
