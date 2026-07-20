@@ -13,7 +13,7 @@ launch.exe
 pythonlib/test*
 jsonvv/test*
 /.vscode
-/bundle/fonts/extra
+/browserbuild/bundle/fonts/extra
 pythonlib/*.png
 scripts/*.png
 scripts/test*

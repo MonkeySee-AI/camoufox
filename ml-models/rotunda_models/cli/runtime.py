@@ -10,7 +10,7 @@ import click
 from ..runtime_export import export_runtime_checkpoint
 from .common import CONTEXT_SETTINGS, PATH_TYPE
 
-FINAL_OUTPUT_DIR = Path("bundle") / "runtime-models"
+FINAL_OUTPUT_DIR = Path("browserbuild") / "bundle" / "runtime-models"
 MOUSE_OUTPUT = "mouse.safetensors"
 KEYBOARD_OUTPUT = "keyboard.safetensors"
 MANIFEST_OUTPUT = "runtime-models.json"
@@ -20,7 +20,7 @@ def _find_repo_root() -> Path:
     """Locate the repository root for release-bundle exports."""
     candidates = [Path.cwd(), *Path(__file__).resolve().parents]
     for candidate in candidates:
-        if (candidate / "bundle").is_dir() and (candidate / "ml-models").is_dir():
+        if (candidate / "browserbuild" / "bundle").is_dir() and (candidate / "ml-models").is_dir():
             return candidate
     return Path.cwd()
 

@@ -29,11 +29,18 @@ TESTS_UV := uv run --project . --package rotunda-tests --locked
 PLAYWRIGHT_UV := uv run --project . --package rotunda-tests --group playwright-tests --locked
 ROTUNDA_UV := uv run --project . --package rotunda --locked
 
+BROWSERBUILD_DIR := browserbuild
+BROWSERBUILD_ASSETS_DIR := $(BROWSERBUILD_DIR)/assets
+BROWSERBUILD_ADDITIONS_DIR := $(BROWSERBUILD_DIR)/additions
+BROWSERBUILD_PATCHES_DIR := $(BROWSERBUILD_DIR)/patches
+BROWSERBUILD_SETTINGS_DIR := $(BROWSERBUILD_DIR)/settings
+BROWSERBUILD_BUNDLE_DIR := $(BROWSERBUILD_DIR)/bundle
+
 OPENAPI_SCHEMA := schemas/rotunda-profile.openapi.yaml
 PY_OPENAPI_MODELS := pythonlib/rotunda/_generated_profile.py
 ML_DATA_OPENAPI_SCHEMA := schemas/rotunda-ml-data-capture.openapi.yaml
 PY_ML_DATA_MODELS := ml-models/rotunda_models/_generated_data_capture.py
-CPP_OPENAPI_OUT := additions/rotundacfg/generated/profile
+CPP_OPENAPI_OUT := $(BROWSERBUILD_ADDITIONS_DIR)/rotundacfg/generated/profile
 CPP_OPENAPI_TEMPLATES := schemas/openapi-templates/cpp-nlohmann
 OPENAPI_GENERATOR_IMAGE ?= openapitools/openapi-generator-cli:v7.22.0
 OPENAPI_GENERATOR ?= docker run --rm -v $(CURDIR):/local $(OPENAPI_GENERATOR_IMAGE)
@@ -89,7 +96,7 @@ setup-minimal:
 	rm -rf $(cf_source_dir)
 	mkdir -p $(cf_source_dir)
 	tar -xJf $(ff_source_tarball) -C $(cf_source_dir) --strip-components=1
-	# Copy settings & additions
+	# Copy browser build settings and additions
 	cd $(cf_source_dir) && bash ../scripts/copy-additions.sh $(version) $(release)
 
 setup: setup-minimal
@@ -102,8 +109,8 @@ setup: setup-minimal
 
 ff-dbg: setup
 	# Only apply patches to help debug vanilla Firefox
-	make patch ./patches/chromeutil.patch
-	make patch ./patches/browser-init.patch
+	make patch $(BROWSERBUILD_PATCHES_DIR)/chromeutil.patch
+	make patch $(BROWSERBUILD_PATCHES_DIR)/browser-init.patch
 	echo "LOCAL_INCLUDES += ['/rotundacfg']" >> $(cf_source_dir)/dom/base/moz.build
 	touch $(cf_source_dir)/_READY
 	make checkpoint
@@ -163,7 +170,7 @@ bundle-runtime-models:
 	for resources in $(cf_source_dir)/obj-*/dist/Rotunda.app/Contents/Resources; do \
 		if [ -d "$$resources" ]; then \
 			mkdir -p "$$resources/runtime-models"; \
-			cp -R bundle/runtime-models/. "$$resources/runtime-models/"; \
+			cp -R $(BROWSERBUILD_BUNDLE_DIR)/runtime-models/. "$$resources/runtime-models/"; \
 			echo "Bundled runtime models -> $$resources/runtime-models"; \
 			copied=1; \
 		fi; \
@@ -171,7 +178,7 @@ bundle-runtime-models:
 	for bin in $(cf_source_dir)/obj-*/dist/bin; do \
 		if [ -d "$$bin" ]; then \
 			mkdir -p "$$bin/runtime-models"; \
-			cp -R bundle/runtime-models/. "$$bin/runtime-models/"; \
+			cp -R $(BROWSERBUILD_BUNDLE_DIR)/runtime-models/. "$$bin/runtime-models/"; \
 			echo "Bundled runtime models -> $$bin/runtime-models"; \
 			copied=1; \
 		fi; \
@@ -185,9 +192,9 @@ edits:
 
 package-linux:
 	uv run scripts/package.py linux \
-		--include settings/chrome.css \
-		--include bundle/runtime-models \
-		--include bundle/fontconfig \
+		--include $(BROWSERBUILD_SETTINGS_DIR)/chrome.css \
+		--include $(BROWSERBUILD_BUNDLE_DIR)/runtime-models \
+		--include $(BROWSERBUILD_BUNDLE_DIR)/fontconfig \
 		--version $(version) \
 		--release $(release) \
 		--arch $(arch) \
@@ -195,8 +202,8 @@ package-linux:
 
 package-macos:
 	uv run scripts/package.py macos \
-		--include settings/chrome.css \
-		--include bundle/runtime-models \
+		--include $(BROWSERBUILD_SETTINGS_DIR)/chrome.css \
+		--include $(BROWSERBUILD_BUNDLE_DIR)/runtime-models \
 		--version $(version) \
 		--release $(release) \
 		--arch $(arch) \
@@ -204,8 +211,8 @@ package-macos:
 
 package-windows:
 	uv run scripts/package.py windows \
-		--include settings/chrome.css \
-		--include bundle/runtime-models \
+		--include $(BROWSERBUILD_SETTINGS_DIR)/chrome.css \
+		--include $(BROWSERBUILD_BUNDLE_DIR)/runtime-models \
 		--include ~/.mozbuild/vs/VC/Redist/MSVC/14.38.33135/$(vcredist_arch)/Microsoft.VC143.CRT/*.dll \
 		--version $(version) \
 		--release $(release) \
@@ -227,12 +234,12 @@ edit-cfg:
 
 check-arg:
 	@if [ -z "$(_ARGS)" ]; then \
-		echo "Error: No file specified. Usage: make <command> ./patches/file.patch"; \
+		echo "Error: No file specified. Usage: make <command> $(BROWSERBUILD_PATCHES_DIR)/file.patch"; \
 		exit 1; \
 	fi
 
 grep:
-	grep "$(_ARGS)" -r ./patches/*.patch
+	grep "$(_ARGS)" -r $(BROWSERBUILD_PATCHES_DIR)/*.patch
 
 patch:
 	@make check-arg $(_ARGS);

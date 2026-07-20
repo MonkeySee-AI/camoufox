@@ -15,7 +15,7 @@ from shlex import join
 
 import click
 
-from _mixin import find_src_dir, get_moz_target, list_files, run, temp_cd
+from _mixin import BROWSERBUILD_DIR, find_src_dir, get_moz_target, list_files, run, temp_cd
 
 UNNEEDED_PATHS = {'uninstall', 'pingsender.exe', 'pingsender', 'vaapitest', 'glxtest'}
 
@@ -117,7 +117,7 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
         if target == 'linux':
             for font in fonts or []:
                 shutil.copytree(
-                    os.path.join('bundle', 'fonts', font),
+                    os.path.join(BROWSERBUILD_DIR, 'bundle', 'fonts', font),
                     os.path.join(fonts_dir, font),
                     dirs_exist_ok=True,
                 )
@@ -126,7 +126,10 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
         else:
             os.makedirs(fonts_dir, exist_ok=True)
             for font in fonts or []:
-                for file in list_files(root_dir=os.path.join('bundle', 'fonts', font), suffix='*'):
+                for file in list_files(
+                    root_dir=os.path.join(BROWSERBUILD_DIR, 'bundle', 'fonts', font),
+                    suffix='*',
+                ):
                     shutil.copy2(file, os.path.join(fonts_dir, os.path.basename(file)))
 
         # Remove unneeded paths
@@ -161,7 +164,7 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
     "--fonts",
     "fonts",
     multiple=True,
-    help="Font directory under bundle/fonts to include. Can be repeated.",
+    help="Font directory under browserbuild/bundle/fonts to include. Can be repeated.",
 )
 def main(
     target_os: str,

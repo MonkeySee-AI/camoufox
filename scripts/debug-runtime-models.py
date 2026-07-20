@@ -22,12 +22,13 @@ import click
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_DIR = ROOT / "additions" / "rotundacfg"
+BROWSERBUILD_DIR = ROOT / "browserbuild"
+RUNTIME_DIR = BROWSERBUILD_DIR / "additions" / "rotundacfg"
 FIXTURE_DIR = ROOT / "__tests__" / "fixtures" / "cpp"
 SOURCE = ROOT / "scripts" / "runtime-model-debug.cpp"
 DEFAULT_OUTPUT_ROOT = ROOT / "Training" / "debug_runtime"
-DEFAULT_MOUSE_MODEL = ROOT / "bundle" / "runtime-models" / "mouse.safetensors"
-DEFAULT_KEYBOARD_MODEL = ROOT / "bundle" / "runtime-models" / "keyboard.safetensors"
+DEFAULT_MOUSE_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "mouse.safetensors"
+DEFAULT_KEYBOARD_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "keyboard.safetensors"
 
 
 @dataclass(frozen=True)

@@ -1065,7 +1065,7 @@ def _bundle_resource_roots(executable_path: Path) -> list[Path]:
 
 
 def _source_bundle_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "bundle"
+    return Path(__file__).resolve().parents[2] / "browserbuild" / "bundle"
 
 
 def _dedupe_paths(paths: Iterable[Path]) -> list[Path]:

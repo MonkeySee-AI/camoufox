@@ -321,7 +321,9 @@ def _discover_bundled_runtime_fonts() -> tuple[Font, ...]:
 
 
 def _runtime_font_dir_candidates() -> tuple[Path, ...]:
-    candidates: list[Path] = [Path(__file__).resolve().parents[3] / "bundle" / "fonts" / "linux"]
+    candidates: list[Path] = [
+        Path(__file__).resolve().parents[3] / "browserbuild" / "bundle" / "fonts" / "linux"
+    ]
 
     try:
         from ..pkgman import OS_NAME, rotunda_path

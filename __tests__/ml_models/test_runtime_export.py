@@ -105,6 +105,8 @@ def test_export_runtime_command_final_writes_browser_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Build a real checkpoint so --final proves the exported artifact and
+    # manifest land in the browser build payload.
     model_config = {
         "condition_dim": 7,
         "previous_dim": 3 + len(MOUSE_ACTIONS) + 1,
@@ -127,7 +129,7 @@ def test_export_runtime_command_final_writes_browser_bundle(
         checkpoint_path,
     )
     repo_root = tmp_path / "repo"
-    (repo_root / "bundle").mkdir(parents=True)
+    (repo_root / "browserbuild" / "bundle").mkdir(parents=True)
     (repo_root / "ml-models").mkdir()
     monkeypatch.chdir(repo_root)
 
@@ -137,8 +139,8 @@ def test_export_runtime_command_final_writes_browser_bundle(
     )
 
     assert result.exit_code == 0, result.output
-    output_path = repo_root / "bundle" / "runtime-models" / "mouse.safetensors"
-    manifest_path = repo_root / "bundle" / "runtime-models" / "runtime-models.json"
+    output_path = repo_root / "browserbuild" / "bundle" / "runtime-models" / "mouse.safetensors"
+    manifest_path = repo_root / "browserbuild" / "bundle" / "runtime-models" / "runtime-models.json"
     assert output_path.is_file()
     assert manifest_path.is_file()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

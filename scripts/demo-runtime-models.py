@@ -19,8 +19,9 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "rotunda-150.0.1-beta.25"
-DEFAULT_MOUSE_MODEL = ROOT / "bundle" / "runtime-models" / "mouse.safetensors"
-DEFAULT_KEYBOARD_MODEL = ROOT / "bundle" / "runtime-models" / "keyboard.safetensors"
+BROWSERBUILD_DIR = ROOT / "browserbuild"
+DEFAULT_MOUSE_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "mouse.safetensors"
+DEFAULT_KEYBOARD_MODEL = BROWSERBUILD_DIR / "bundle" / "runtime-models" / "keyboard.safetensors"
 DEFAULT_OUTPUT_ROOT = ROOT / "Training" / "debug_media"
 DEFAULT_TEXT = "rotunda models ship"
 DEFAULT_PARAGRAPH = (

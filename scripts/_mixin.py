@@ -14,6 +14,12 @@ import sys
 import time
 
 start_time = time.time()
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BROWSERBUILD_DIR = os.environ.get(
+    'ROTUNDA_BROWSERBUILD_DIR',
+    os.path.join(REPO_ROOT, 'browserbuild'),
+)
+PATCHES_DIR = os.path.join(BROWSERBUILD_DIR, 'patches')
 
 
 @contextlib.contextmanager
@@ -73,8 +79,10 @@ def list_files(root_dir, suffix):
             yield os.path.join(root_dir, relative_path).replace('\\', '/')
 
 
-def list_patches(root_dir='../patches', suffix='*.patch'):
+def list_patches(root_dir=None, suffix='*.patch'):
     """List all patch files"""
+    if root_dir is None:
+        root_dir = PATCHES_DIR
     return sorted(list_files(root_dir, suffix), key=os.path.basename)
 
 def is_bootstrap_patch(name):
@@ -122,6 +130,9 @@ def patch(patchfile, reverse=False, silent=False):
 
 
 __all__ = [
+    'BROWSERBUILD_DIR',
+    'PATCHES_DIR',
+    'REPO_ROOT',
     'get_moz_target',
     'list_patches',
     'patch',

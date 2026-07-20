@@ -5,7 +5,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BRANDING_DIR="$SCRIPT_DIR/../additions/browser/branding/rotunda"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BROWSERBUILD_DIR="${ROTUNDA_BROWSERBUILD_DIR:-$REPO_ROOT/browserbuild}"
+BRANDING_DIR="$BROWSERBUILD_DIR/additions/browser/branding/rotunda"
 XCASSETS_DIR="$BRANDING_DIR/Assets.xcassets"
 APPICONSET_DIR="$XCASSETS_DIR/AppIcon.appiconset"
 OUTPUT_FILE="$BRANDING_DIR/Assets.car"

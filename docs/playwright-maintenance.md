@@ -8,7 +8,7 @@ Rotunda integrates Playwright's browser automation capabilities through patches 
 
 ## Patch Files
 
-Location: `patches/playwright/`
+Location: `browserbuild/patches/playwright/`
 
 | File                   | Purpose                                                                                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,7 +17,7 @@ Location: `patches/playwright/`
 
 ## Addition Files
 
-Location: `additions/juggler/`
+Location: `browserbuild/additions/juggler/`
 
 The `juggler` directory contains Playwright's Juggler protocol implementation. These files must be kept in sync with:
 
@@ -55,12 +55,12 @@ This maintains backward compatibility while satisfying Firefox 146's static comp
 
 ### 1. Update Upstream Patches
 
-Compare the current `patches/playwright/0-playwright.patch` with Playwright's [bootstrap.diff](https://github.com/microsoft/playwright/blob/main/browser_patches/firefox/patches/bootstrap.diff).
+Compare the current `browserbuild/patches/playwright/0-playwright.patch` with Playwright's [bootstrap.diff](https://github.com/microsoft/playwright/blob/main/browser_patches/firefox/patches/bootstrap.diff).
 
 If changes are needed:
 ```bash
 # Download latest bootstrap.diff
-curl -o patches/playwright/0-playwright.patch \
+curl -o browserbuild/patches/playwright/0-playwright.patch \
   https://raw.githubusercontent.com/microsoft/playwright/main/browser_patches/firefox/patches/bootstrap.diff
 
 # Test the build
@@ -69,21 +69,21 @@ make clean && make dir && make build
 
 ### 2. Update Juggler Files
 
-Sync `additions/juggler/` with upstream:
+Sync `browserbuild/additions/juggler/` with upstream:
 
 ```bash
 # Clone Playwright repository
 git clone https://github.com/microsoft/playwright.git /tmp/playwright
 
 # Compare directories
-diff -r additions/juggler/ /tmp/playwright/browser_patches/firefox/juggler/
+diff -r browserbuild/additions/juggler/ /tmp/playwright/browser_patches/firefox/juggler/
 
 # Copy updated files (example)
-cp -r /tmp/playwright/browser_patches/firefox/juggler/* additions/juggler/
+cp -r /tmp/playwright/browser_patches/firefox/juggler/* browserbuild/additions/juggler/
 
 # IMPORTANT: Preserve Firefox 146 ESM compatibility
-# - Keep additions/juggler/components/Juggler.sys.mjs
-# - Keep additions/juggler/components/components.conf with esModule field
+# - Keep browserbuild/additions/juggler/components/Juggler.sys.mjs
+# - Keep browserbuild/additions/juggler/components/components.conf with esModule field
 ```
 
 ### 3. Verify ESM Wrapper Compatibility
