@@ -13,9 +13,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.async_api import Playwright
+from __tests__.fixtures.remote_juggler import launch_remote_juggler, terminate_process
 from rotunda import AsyncNewContext, async_connect_over_remote_juggler
 
-from .test_remote_juggler import _launch_remote_juggler, _terminate_process
+pytestmark = pytest.mark.integration
 
 _PROBE_HTML = rb"""<!doctype html><meta charset="utf-8"><script>
 (() => {
@@ -194,7 +195,7 @@ async def _capture_stock_firefox(
     try:
         await _wait_for_report(event, "stock Firefox")
     finally:
-        await _terminate_process(process)
+        await terminate_process(process)
 
 
 async def _capture_rotunda(
@@ -206,7 +207,7 @@ async def _capture_rotunda(
 ) -> None:
     profile_dir.mkdir()
     browser = None
-    process, ws_endpoint, _logs, readers = await _launch_remote_juggler(
+    process, ws_endpoint, _logs, readers = await launch_remote_juggler(
         executable,
         profile_dir,
     )
@@ -224,7 +225,7 @@ async def _capture_rotunda(
     finally:
         if browser is not None and browser.is_connected():
             await browser.close()
-        await _terminate_process(process)
+        await terminate_process(process)
         for reader in readers:
             reader.cancel()
         await asyncio.gather(*readers, return_exceptions=True)
@@ -268,7 +269,10 @@ def _surface_diff(stock: dict[str, Any], rotunda: dict[str, Any]) -> dict[str, A
 async def test_rotunda_javascript_surface_matches_stock_firefox(
     playwright: Playwright,
     tmp_path: Path,
+    pytestconfig: pytest.Config,
 ) -> None:
+    if not pytestconfig.getoption("--integration"):
+        pytest.skip("Firefox parity requires --integration.")
     rotunda = os.getenv("ROTUNDA_EXECUTABLE_PATH")
     stock = os.getenv("STOCK_FIREFOX_EXECUTABLE_PATH")
     if not stock and sys.platform == "darwin":

@@ -21,6 +21,17 @@ uv run --group dev --group playwright-tests --locked pytest \
 
 The first run will install `build-tester` npm dependencies automatically if the checks bundle has not been built yet.
 
+To compare Rotunda's page-visible globals, built-in object/prototype descriptors,
+native function definitions, and error stacks with stock Firefox from the same
+source version:
+
+```bash
+STOCK_FIREFOX_EXECUTABLE_PATH=/Applications/Firefox.app/Contents/MacOS/firefox \
+ROTUNDA_EXECUTABLE_PATH=/path/to/rotunda \
+  uv run --group dev --group playwright-tests pytest --integration \
+  __tests__/build-tester/test_firefox_parity.py
+```
+
 ## Direct CLI Usage
 
 ```bash

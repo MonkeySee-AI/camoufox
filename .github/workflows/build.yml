@@ -593,7 +593,7 @@ jobs:
           .venv/bin/python -m pytest \
             --integration \
             --headless \
-            __tests__/playwright/async/test_remote_juggler.py
+            __tests__/build-tester/test_remote_juggler.py
 
   publish-python-package:
     needs:
