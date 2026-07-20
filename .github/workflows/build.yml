@@ -452,6 +452,45 @@ jobs:
           sudo apt-get install -y unzip
           uv run --package rotunda-tests --group playwright-tests --locked playwright install-deps firefox
 
+      - name: Install matching stock Firefox
+        id: stock-firefox
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          source upstream.sh
+          firefox_version="${ROTUNDA_FIREFOX_VERSION:-$version}"
+          install_dir="$RUNNER_TEMP/stock-firefox"
+          mkdir -p "$install_dir"
+
+          if [[ "$TARGET" == "macos" ]]; then
+            archive="$RUNNER_TEMP/firefox-$firefox_version.dmg"
+            mount_dir="$RUNNER_TEMP/firefox-volume"
+            curl --fail --location --retry 3 \
+              "https://archive.mozilla.org/pub/firefox/releases/$firefox_version/mac/en-US/Firefox%20$firefox_version.dmg" \
+              --output "$archive"
+            mkdir -p "$mount_dir"
+            hdiutil attach "$archive" -nobrowse -readonly -mountpoint "$mount_dir"
+            ditto "$mount_dir/Firefox.app" "$install_dir/Firefox.app"
+            hdiutil detach "$mount_dir"
+            executable_path="$install_dir/Firefox.app/Contents/MacOS/firefox"
+          else
+            archive_arch="$ARCH"
+            if [[ "$archive_arch" == "arm64" ]]; then
+              archive_arch="aarch64"
+            fi
+            archive="$RUNNER_TEMP/firefox-$firefox_version.tar.xz"
+            curl --fail --location --retry 3 \
+              "https://archive.mozilla.org/pub/firefox/releases/$firefox_version/linux-$archive_arch/en-US/firefox-$firefox_version.tar.xz" \
+              --output "$archive"
+            tar -xJf "$archive" -C "$install_dir"
+            executable_path="$install_dir/firefox/firefox"
+          fi
+
+          "$executable_path" --version | grep -F "Firefox $firefox_version"
+          echo "executable_path=$executable_path" >> "$GITHUB_OUTPUT"
+
       - name: Resolve Rotunda executable
         id: artifact
         run: |
@@ -463,6 +502,7 @@ jobs:
       - name: Run integration tests
         env:
           ROTUNDA_EXECUTABLE_PATH: ${{ steps.artifact.outputs.executable_path }}
+          STOCK_FIREFOX_EXECUTABLE_PATH: ${{ steps.stock-firefox.outputs.executable_path }}
         run: |
           uv run --package rotunda-tests --group playwright-tests --locked pytest \
             --integration \
