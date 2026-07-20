@@ -678,6 +678,7 @@ def test_generate_context_fingerprint_strips_webgl_but_keeps_native_canvas(
     assert 'if (typeof w.setAudioFingerprintSeed === "function")' in init_script
     assert "setCanvasSeed" not in init_script
     assert 'if (typeof w.setFontSpacingSeed === "function")' in init_script
+    assert "delete w.setWebRTCIPv6" in init_script
 
 
 def test_generate_context_fingerprint_emits_debug_logs(
@@ -696,6 +697,19 @@ def test_generate_context_fingerprint_emits_debug_logs(
     assert "[rotunda:fingerprint] Generating BrowserForge Firefox skeleton." in output
     assert "[rotunda:fingerprint] Context options ready:" in output
     assert result["context_options"]["user_agent"].endswith("Firefox/145.0")
+
+
+def test_runtime_profile_init_script_cleans_up_every_injected_setter(
+    modules: tuple[Any, Any, Any],
+) -> None:
+    _, _, utils = modules
+
+    script = utils.runtime_profile_init_script({})
+
+    assert "delete w.setFontSpacingSeed" in script
+    assert "delete w.setSpeechVoices" in script
+    assert "delete w.setWebRTCIPv4" in script
+    assert "delete w.setWebRTCIPv6" in script
 
 
 def test_generate_context_fingerprint_reuses_supplied_browserforge_fingerprint(

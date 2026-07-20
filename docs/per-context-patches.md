@@ -39,7 +39,7 @@ Rotunda spoofs fingerprints globally via the runtime profile — every browser c
 | `window.setFontList(fonts)` | `font-list-spoofing.patch` | Which fonts appear "installed" to fingerprinters |
 | `window.setSpeechVoices(voices)` | `speech-voices-spoofing.patch` | `speechSynthesis.getVoices()` filtering |
 
-All 14 functions **self-destruct after the first call** — page JavaScript cannot detect them via `typeof window.setTimezone`.
+All 15 functions **self-destruct after initialization** — page JavaScript cannot detect them via `typeof window.setTimezone`.
 
 ---
 
@@ -621,7 +621,7 @@ The Rotunda Python package (`pythonlib/`) generates fingerprints for both `NewBr
 - `generate_context_fingerprint()` — main API. Returns `{init_script, context_options, config, preset}`
 - `from_preset()` — compiles an explicit caller-supplied preset dict into the same host-compatible `RotundaProfile`
 - `from_browserforge()` — converts a BrowserForge Fingerprint into the generated nested `RotundaProfile` model
-- `_build_init_script()` — generates the JavaScript IIFE for the remaining per-context overrides (`setWebRTCIPv6` is not included — IPv6 is optional and rarely set)
+- `_build_init_script()` — generates the JavaScript IIFE for the remaining per-context overrides (`setWebRTCIPv6` is cleaned up even when no optional IPv6 override is set)
 - `_MacOSHostProfile` — probes the real macOS host for GPU family, installed fonts, and installed voices
 - `_sample_extras()` — adds a small random sample of extra installed fonts or voices on top of the bundled baseline
 

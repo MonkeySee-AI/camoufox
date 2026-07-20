@@ -102,10 +102,9 @@ function rotundaRuntimeInitScripts() {
   if (timezone)
     call('setTimezone', timezone);
 
-  if (lines.length === 2)
-    return '';
-
   for (const setter of [
+    'setFontSpacingSeed',
+    'setAudioFingerprintSeed',
     'setTimezone',
     'setScreenDimensions',
     'setScreenAvailableRect',
@@ -115,6 +114,10 @@ function rotundaRuntimeInitScripts() {
     'setNavigatorOscpu',
     'setNavigatorHardwareConcurrency',
     'setNavigatorUserAgent',
+    'setFontList',
+    'setSpeechVoices',
+    'setWebRTCIPv4',
+    'setWebRTCIPv6',
   ])
     lines.push(`  try { w.${setter} = undefined; delete w.${setter}; } catch (e) {}`);
 

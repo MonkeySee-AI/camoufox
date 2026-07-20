@@ -228,10 +228,9 @@ def runtime_profile_init_script(config: RotundaProfile | dict[str, Any]) -> str:
     if profile.timezone:
         call("setTimezone", profile.timezone)
 
-    if len(lines) == 2:
-        return ""
-
     for setter in (
+        "setFontSpacingSeed",
+        "setAudioFingerprintSeed",
         "setTimezone",
         "setScreenDimensions",
         "setScreenAvailableRect",
@@ -241,6 +240,10 @@ def runtime_profile_init_script(config: RotundaProfile | dict[str, Any]) -> str:
         "setNavigatorOscpu",
         "setNavigatorHardwareConcurrency",
         "setNavigatorUserAgent",
+        "setFontList",
+        "setSpeechVoices",
+        "setWebRTCIPv4",
+        "setWebRTCIPv6",
     ):
         lines.append(f"  try {{ w.{setter} = undefined; delete w.{setter}; }} catch (e) {{}}")
 
