@@ -40,10 +40,6 @@ def main() -> None:
         action="store_true",
         help="Let content processes write VM logs; use only with the offline replay",
     )
-    parser.add_argument(
-        "--descript-email",
-        help="Submit Descript's email OTP form and report the response",
-    )
     parser.add_argument("--user-data-dir", type=Path)
     args = parser.parse_args()
 
@@ -51,9 +47,6 @@ def main() -> None:
         parser.error(
             "--disable-content-sandbox is only allowed with --offline-telemetry"
         )
-    if args.descript_email and not args.url.startswith("https://web.descript.com/"):
-        parser.error("--descript-email requires a https://web.descript.com/ URL")
-
     profile_path = args.profile.expanduser().resolve()
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
     validate_config(profile)
@@ -133,18 +126,10 @@ def main() -> None:
             print(f"Blocked requests: {json.dumps(blocked_requests)}")
         elif args.url != "about:blank":
             page.goto(args.url, wait_until="domcontentloaded")
-            if args.descript_email:
-                page.locator("#email-input").fill(args.descript_email)
-                with page.expect_response(
-                    lambda response: "/b2b/otps/email/discovery/send" in response.url
-                ) as response_info:
-                    page.get_by_role("button", name="Continue with email").click()
-                response = response_info.value
-                print(f"Stytch response: {response.status} {response.text()}")
 
         print(f"Profile: {profile_path}")
         print(f"Firefox: {options['executable_path']}")
-        if not args.offline_telemetry and not args.descript_email:
+        if not args.offline_telemetry:
             input("Press Enter to close Rotunda... ")
         context.close()
 
