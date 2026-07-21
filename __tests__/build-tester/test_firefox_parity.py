@@ -110,6 +110,14 @@ _PROBE_HTML = rb"""<!doctype html><meta charset="utf-8"><script>
     } catch (error) {
       invalidFunctionCall = describeError(error);
     }
+    // Stytch-style telemetry treats zeroed finite animation timing as a
+    // browser-runtime signal, so preserve the observable Firefox values.
+    const animation = document.documentElement.animate(
+      [{opacity: 0}, {opacity: 1}],
+      {duration: 2000, iterations: 1},
+    );
+    const computedTiming = animation.effect.getComputedTiming();
+    animation.cancel();
     const browser = new URL(location.href).searchParams.get("browser");
     await fetch(`/report?browser=${encodeURIComponent(browser)}`, {
       method: "POST",
@@ -118,6 +126,10 @@ _PROBE_HTML = rb"""<!doctype html><meta charset="utf-8"><script>
         windowPrototypeChain,
         runtimeObjects,
         errors: {synchronousError, asynchronousError, invalidFunctionCall},
+        animationTiming: {
+          duration: computedTiming.duration,
+          activeDuration: computedTiming.activeDuration,
+        },
       }),
     });
   }, 0));
@@ -260,7 +272,7 @@ def _surface_diff(stock: dict[str, Any], rotunda: dict[str, Any]) -> dict[str, A
             level_diff["changedDescriptors"] = changed
         if level_diff:
             diff[f"windowPrototypeChain[{index}]"] = level_diff
-    for surface in ("runtimeObjects", "errors"):
+    for surface in ("runtimeObjects", "errors", "animationTiming"):
         if stock[surface] != rotunda[surface]:
             diff[surface] = [stock[surface], rotunda[surface]]
     return diff
