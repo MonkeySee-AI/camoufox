@@ -41,3 +41,17 @@ uv run scripts/stream-juggler-screencast.py \
 For more detail on starting Rotunda with a fixed Juggler port, see [Remote Juggler](remote-juggler.md).
 
 Stop the stream with `Ctrl-C`.
+
+## Stream One DOM Element
+
+Pass a Playwright selector to stream only the first matching element:
+
+```bash
+uv run scripts/stream-juggler-screencast.py \
+  --executable-path "$ROTUNDA_EXE" \
+  --url https://24timezones.com/San-Francisco/time \
+  --selector "#clock" \
+  --port 8899
+```
+
+Element streams use MJPEG automatically. Juggler resolves the selector once, then captures its current document-space box inside Firefox for every frame. Resizes therefore produce JPEGs at the element's new native dimensions, and ordinary offscreen elements are captured without scrolling the page. Open the printed `/mjpeg` URL in a browser or VLC.

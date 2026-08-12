@@ -26,11 +26,10 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import click
 from playwright.async_api import async_playwright
-
 from rotunda import AsyncNewBrowser, async_connect_over_remote_juggler
 
 
@@ -237,7 +236,7 @@ class MjpegHandler(SimpleHTTPRequestHandler):
 
 
 class HlsHandler(SimpleHTTPRequestHandler):
-    extensions_map = {
+    extensions_map: ClassVar[dict[str, str]] = {
         **SimpleHTTPRequestHandler.extensions_map,
         ".m3u8": "application/vnd.apple.mpegurl",
         ".ts": "video/MP2T",
@@ -385,22 +384,34 @@ async def resolve_capture_size(page: Any, args: SimpleNamespace) -> dict[str, in
     return size
 
 
-async def start_screencast(page: Any, on_frame: Any, quality: int, size: dict[str, int]) -> None:
+async def start_screencast(
+    page: Any,
+    on_frame: Any,
+    quality: int,
+    size: dict[str, int] | None,
+    *,
+    selector: str | None = None,
+    fps: int = 25,
+) -> None:
     screencast = page.screencast._impl_obj
     if screencast._started:
         raise RuntimeError("Screencast is already started")
     screencast._started = True
     screencast._on_frame = on_frame
     try:
+        params: dict[str, Any] = {
+            "quality": quality,
+            "sendFrames": True,
+            "record": False,
+        }
+        if size:
+            params["size"] = size
+        if selector:
+            params.update(selector=selector, fps=fps)
         await screencast._page._channel.send_return_as_dict(
             "screencastStart",
             None,
-            {
-                "quality": quality,
-                "sendFrames": True,
-                "record": False,
-                "size": size,
-            },
+            params,
         )
     except Exception:
         screencast._started = False
@@ -459,26 +470,46 @@ async def stream(args: SimpleNamespace) -> None:
             try:
                 if args.url:
                     await page.goto(args.url)
-                capture_size = await resolve_capture_size(page, args)
-                print(f"Requested capture size: {format_size(capture_size)}", flush=True)
+                if args.selector:
+                    await page.locator(args.selector).first.wait_for(
+                        state="visible", timeout=15_000
+                    )
+                    print(f"Element selector: {args.selector}", flush=True)
+                    capture_size = None
+                else:
+                    capture_size = await resolve_capture_size(page, args)
+                    print(
+                        f"Requested capture size: {format_size(capture_size)}",
+                        flush=True,
+                    )
                 frame_count = 0
                 actual_frame_size: dict[str, int] | None = None
 
                 def on_frame(frame: dict[str, Any]) -> None:
                     nonlocal actual_frame_size, frame_count
                     frame_data = normalize_frame_data(frame["data"])
-                    if actual_frame_size is None:
-                        actual_frame_size = jpeg_size(frame_data)
-                        if actual_frame_size:
-                            print(f"Actual frame size: {format_size(actual_frame_size)}", flush=True)
+                    new_size = jpeg_size(frame_data)
+                    if new_size and new_size != actual_frame_size:
+                        actual_frame_size = new_size
+                        print(
+                            f"Actual frame size: {format_size(actual_frame_size)}",
+                            flush=True,
+                        )
                     frame_source.update(frame_data)
                     frame_count += 1
                     if args.print_frames and frame_count % args.print_frames == 0:
                         print(f"frames={frame_count}", flush=True)
 
-                await start_screencast(page, on_frame, args.quality, capture_size)
+                await start_screencast(
+                    page,
+                    on_frame,
+                    args.quality,
+                    capture_size,
+                    selector=args.selector,
+                    fps=args.fps,
+                )
                 try:
-                    if args.seed_screenshot:
+                    if args.seed_screenshot and capture_size:
                         viewport_size = page.viewport_size
                         if viewport_size == capture_size:
                             frame_source.update(
@@ -528,13 +559,14 @@ def _validate_range(param_hint: str, value: int | float, lower: int | float, upp
 @click.option("--new-context", is_flag=True, help="Create a new context when attaching to an endpoint.")
 @click.option("--new-page", is_flag=True, help="Create a new page when attaching to an endpoint.")
 @click.option("--page-index", type=int, default=0, show_default=True, help="Existing page index to stream when attaching.")
+@click.option("--selector", help="Stream the first element matching this Playwright selector as MJPEG.")
 @click.option("--viewport", default="1280x720", show_default=True, callback=_viewport_callback, help="Browser viewport, formatted as WIDTHxHEIGHT.")
 @click.option("--capture-size", callback=_viewport_callback, help="Juggler JPEG frame size. Defaults to the page viewport.")
 @click.option("--quality", type=int, default=95, show_default=True, help="Juggler JPEG quality, 1-100.")
 @click.option("--fps", type=int, default=25, show_default=True, help="Output stream FPS.")
 @click.option("--seed-screenshot/--no-seed-screenshot", default=False, show_default=True, help="Seed the stream with a JPEG screenshot before live frames arrive. Off by default so the stream size is set by the first Juggler frame.")
 @click.option("--print-frames", type=int, default=0, show_default=True, help="Print every N received Juggler frames.")
-@click.option("--mode", type=click.Choice(["hls", "mjpeg"]), default="hls", show_default=True)
+@click.option("--mode", type=click.Choice(["hls", "mjpeg"]), help="Output format. Defaults to MJPEG with --selector, otherwise HLS.")
 @click.option("--host", default="127.0.0.1", show_default=True)
 @click.option("--port", type=int, default=8899, show_default=True)
 @click.option("--output-dir", type=click.Path(file_okay=False, dir_okay=True, path_type=Path), help="HLS output directory. Defaults to a temp directory.")
@@ -545,6 +577,12 @@ def _validate_range(param_hint: str, value: int | float, lower: int | float, upp
 @click.option("--hls-list-size", type=int, default=2, show_default=True, help="Number of HLS segments advertised in the live playlist.")
 @click.option("--ffmpeg-loglevel", default="warning", show_default=True)
 def main(**kwargs: Any) -> None:
+    kwargs["mode"] = kwargs["mode"] or ("mjpeg" if kwargs["selector"] else "hls")
+    if kwargs["selector"] and kwargs["mode"] != "mjpeg":
+        raise click.BadParameter(
+            "element streams require MJPEG so frame dimensions can follow the element",
+            param_hint="--mode",
+        )
     _validate_range("--fps", kwargs["fps"], 1, 60)
     _validate_range("--quality", kwargs["quality"], 1, 100)
     _validate_range("--crf", kwargs["crf"], 0, 51)

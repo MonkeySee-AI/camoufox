@@ -6,6 +6,7 @@ _ASSET_DIR = Path(__file__).resolve().parent
 _ASSET_PATHS = {
     "connectRemoteJuggler.js": _ASSET_DIR / "connectRemoteJuggler.js",
     "launchServer.js": _ASSET_DIR / "launchServer.js",
+    "playwrightElementScreencastPatch.js": _ASSET_DIR / "playwrightElementScreencastPatch.js",
     "playwrightUtilityEvalPatch.js": _ASSET_DIR / "playwrightUtilityEvalPatch.js",
     "repos.yml": _ASSET_DIR / "repos.yml",
     "territoryInfo.xml": _ASSET_DIR / "territoryInfo.xml",

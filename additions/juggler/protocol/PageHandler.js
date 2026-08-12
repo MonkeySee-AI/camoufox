@@ -8,7 +8,7 @@ const {Helper, EventWatcher} = ChromeUtils.importESModule('chrome://juggler/cont
 const {NetUtil} = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const {NetworkObserver, PageNetwork} = ChromeUtils.importESModule('chrome://juggler/content/NetworkObserver.js');
 const {PageTarget} = ChromeUtils.importESModule('chrome://juggler/content/TargetRegistry.js');
-const {setTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
+const {clearTimeout, setTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -123,6 +123,7 @@ export class PageHandler {
     this._contentChannel = contentChannel;
     this._contentPage = contentChannel.connect('page');
     this._workers = new Map();
+    this._elementScreencast = null;
 
     this._pageTarget = target;
     this._pageNetwork = PageNetwork.forPageTarget(target);
@@ -205,6 +206,7 @@ export class PageHandler {
   }
 
   async dispose() {
+    await this._stopElementScreencast();
     this._contentPage.dispose();
     for (const watcher of this._pendingEventWatchers)
       watcher.dispose();
@@ -868,15 +870,85 @@ export class PageHandler {
   }
 
   async ['Page.startScreencast'](options) {
+    if (options.objectId || options.frameId)
+      return await this._startElementScreencast(options);
     return await this._pageTarget.startScreencast(options);
   }
 
   async ['Page.screencastFrameAck'](options) {
+    if (this._elementScreencast) {
+      this._elementScreencast.waitingForAck = false;
+      return;
+    }
     await this._pageTarget.screencastFrameAck(options);
   }
 
   async ['Page.stopScreencast'](options) {
+    if (this._elementScreencast) {
+      await this._stopElementScreencast();
+      return;
+    }
     await this._pageTarget.stopScreencast(options);
+  }
+
+  async _startElementScreencast({frameId, objectId, quality = 90, fps = 25}) {
+    if (!frameId || !objectId)
+      throw new Error('Element screencast requires frameId and objectId');
+    if (this._elementScreencast)
+      throw new Error('Screencast is already running');
+    if (fps < 1 || fps > 60)
+      throw new Error('Element screencast FPS must be between 1 and 60');
+
+    await this._contentPage.send('startElementScreencast', {frameId, objectId});
+    const state = {
+      id: helper.generateId(),
+      interval: 1000 / fps,
+      quality,
+      timer: null,
+      waitingForAck: false,
+    };
+    this._elementScreencast = state;
+    void this._captureElementScreencastFrame(state);
+    return {screencastId: state.id};
+  }
+
+  async _captureElementScreencastFrame(state) {
+    const started = Date.now();
+    try {
+      if (!state.waitingForAck) {
+        const rect = await this._contentPage.send('getElementScreencastBoundingBox');
+        const {data} = await this['Page.screenshot']({
+          mimeType: 'image/jpeg',
+          clip: rect,
+          omitDeviceScaleFactor: true,
+          quality: state.quality,
+        });
+        if (this._elementScreencast !== state)
+          return;
+        state.waitingForAck = true;
+        this._session.emitEvent('Page.screencastFrame', {
+          data,
+          deviceWidth: rect.width,
+          deviceHeight: rect.height,
+          timestamp: Date.now() / 1000,
+        });
+      }
+    } catch (error) {
+      if (this._elementScreencast !== state)
+        return;
+    }
+    if (this._elementScreencast === state)
+      state.timer = setTimeout(() => void this._captureElementScreencastFrame(state), Math.max(0, state.interval - (Date.now() - started)));
+  }
+
+  async _stopElementScreencast() {
+    const state = this._elementScreencast;
+    if (!state)
+      return;
+    this._elementScreencast = null;
+    if (state.timer)
+      clearTimeout(state.timer);
+    await this._contentPage.send('stopElementScreencast').catch(() => {});
   }
 
   async ['Page.sendMessageToWorker']({workerId, message}) {

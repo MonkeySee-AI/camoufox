@@ -985,9 +985,12 @@ const Page = {
     },
     'startScreencast': {
       params: {
-        width: t.Number,
-        height: t.Number,
+        width: t.Optional(t.Number),
+        height: t.Optional(t.Number),
         quality: t.Number,
+        frameId: t.Optional(t.String),
+        objectId: t.Optional(t.String),
+        fps: t.Optional(t.Number),
       },
       returns: {
         screencastId: t.String,

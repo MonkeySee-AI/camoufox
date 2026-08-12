@@ -163,6 +163,7 @@ export class PageAgent {
     this._runtime = frameTree.runtime();
 
     this._workerData = new Map();
+    this._elementScreencastNode = null;
 
     const docShell = frameTree.mainFrame().docShell();
     this._docShell = docShell;
@@ -257,6 +258,9 @@ export class PageAgent {
         getContentQuads: this._getContentQuads.bind(this),
         getFullAXTree: this._getFullAXTree.bind(this),
         insertText: this._insertText.bind(this),
+        startElementScreencast: this._startElementScreencast.bind(this),
+        getElementScreencastBoundingBox: this._getElementScreencastBoundingBox.bind(this),
+        stopElementScreencast: this._stopElementScreencast.bind(this),
         scrollIntoViewIfNeeded: this._scrollIntoViewIfNeeded.bind(this),
         setFileInputFiles: this._setFileInputFiles.bind(this),
         evaluate: this._runtime.evaluate.bind(this._runtime),
@@ -445,6 +449,7 @@ export class PageAgent {
   }
 
   dispose() {
+    this._elementScreencastNode = null;
     for (const workerData of this._workerData.values())
       workerData.dispose();
     this._workerData.clear();
@@ -568,6 +573,38 @@ export class PageAgent {
       y2 = Math.max(boundingBox.y + boundingBox.height, y2);
     }
     return {x: x1, y: y1, width: x2 - x1, height: y2 - y1};
+  }
+
+  _startElementScreencast({objectId, frameId}) {
+    const frame = this._frameTree.frame(frameId);
+    if (!frame)
+      throw new Error('Failed to find frame with id = ' + frameId);
+    const unsafeObject = frame.unsafeObject(objectId);
+    if (!unsafeObject)
+      throw new Error('Failed to find screencast element');
+    this._elementScreencastNode = unsafeObject;
+    return this._getElementScreencastBoundingBox();
+  }
+
+  _getElementScreencastBoundingBox() {
+    const node = this._elementScreencastNode;
+    if (!node || !node.isConnected)
+      throw new Error('Screencast element is detached from document');
+    const box = this._getNodeBoundingBox(node);
+    if (!box || box.width <= 0 || box.height <= 0)
+      throw new Error('Screencast element has no visible layout box');
+    const x = Math.floor(box.x);
+    const y = Math.floor(box.y);
+    return {
+      x,
+      y,
+      width: Math.ceil(box.x + box.width) - x,
+      height: Math.ceil(box.y + box.height) - y,
+    };
+  }
+
+  _stopElementScreencast() {
+    this._elementScreencastNode = null;
   }
 
   async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}) {

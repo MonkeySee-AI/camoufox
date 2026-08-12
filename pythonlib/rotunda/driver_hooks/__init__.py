@@ -7,6 +7,10 @@ from .base import (
 )
 from .isolated_eval import async_evaluate_in_utility, evaluate_in_utility
 
+register_playwright_driver_hook(
+    "element_screencast", "playwrightElementScreencastPatch.js"
+)
+
 __all__ = [
     "PlaywrightDriverHook",
     "async_evaluate_in_utility",
