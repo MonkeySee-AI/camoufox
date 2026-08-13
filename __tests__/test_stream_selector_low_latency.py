@@ -70,3 +70,12 @@ def test_h264_level_matches_fixed_encoder_canvas(
 def test_h265_uses_hevc_annex_b_and_4k60_webcodecs_codec() -> None:
     # The macOS 4K60 path uses HEVC Annex B directly in Chrome WebCodecs.
     assert STREAM.web_codec("h265", 3840, 2160) == "hvc1.1.6.L156.B0"
+
+
+def test_viewer_presents_4k_at_the_encoder_logical_size() -> None:
+    # A 4K backing canvas is 2x the 1920x1080 logical canvas, so its element
+    # pixels retain the same CSS size instead of stretching with the window.
+    html = STREAM.viewer_html("hvc1.1.6.L156.B0").decode()
+
+    assert "rasterScale=Math.min(2,Math.max(1,width/1280,height/720))" in html
+    assert "canvas.style.width=`${width/rasterScale}px`" in html

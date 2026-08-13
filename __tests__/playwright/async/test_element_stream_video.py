@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.util
+import io
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from playwright.async_api import Page, Playwright
 
 ROOT = Path(__file__).parents[3]
@@ -35,7 +37,7 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         chrome = await playwright.chromium.launch(channel="chrome", headless=True)
     except Exception as error:
         pytest.skip(f"Chrome is unavailable for H.264 POC verification: {error}")
-    viewer = await chrome.new_page()
+    viewer = await chrome.new_page(viewport={"width": 320, "height": 180})
 
     try:
         # A changing translucent element ensures native paint and platform
@@ -83,6 +85,22 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
                      window.__streamHeight === 180""",
             timeout=15_000,
         )
+
+        # With a one-to-one client canvas, the native 160x90 element must stay
+        # 160x90 instead of being enlarged to fill the 320x180 video frame.
+        screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
+        blue = [
+            (x, y)
+            for y in range(screenshot.height)
+            for x in range(screenshot.width)
+            if (pixel := screenshot.getpixel((x, y)))[2] > 140
+            and pixel[1] > 40
+            and pixel[0] < 80
+        ]
+        left, top = map(min, zip(*blue))
+        right, bottom = map(max, zip(*blue))
+        assert 150 <= right - left + 1 <= 170
+        assert 82 <= bottom - top + 1 <= 98
     finally:
         with contextlib.suppress(Exception):
             await page.screencast.stop()

@@ -22,6 +22,7 @@ def test_shared_stream_keeps_platform_encoders_behind_gecko_contract() -> None:
     assert "CreateBiPlanarSurface" in source
     assert "YUV420SP_NV12" in source
     assert "startTaskToRender" in STREAM_MAC.read_text()
+    assert "imageByCompositingOverImage" in STREAM_MAC.read_text()
 
 
 def test_build_contract_includes_shared_media_encoder_headers() -> None:

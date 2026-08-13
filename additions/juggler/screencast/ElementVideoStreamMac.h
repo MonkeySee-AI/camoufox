@@ -11,8 +11,8 @@ class MacIOSurface;
 
 namespace mozilla::dom {
 
-bool ScaleElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
-                              const RefPtr<MacIOSurface>& aDestination);
+bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
+                                  const RefPtr<MacIOSurface>& aDestination);
 
 }  // namespace mozilla::dom
 

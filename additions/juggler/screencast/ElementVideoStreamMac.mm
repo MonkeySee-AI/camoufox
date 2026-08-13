@@ -9,18 +9,23 @@
 
 namespace mozilla::dom {
 
-bool ScaleElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
-                              const RefPtr<MacIOSurface>& aDestination) {
+bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
+                                  const RefPtr<MacIOSurface>& aDestination) {
   @autoreleasepool {
     static CIContext* const context =
         [[CIContext alloc] initWithOptions:@{kCIContextUseSoftwareRenderer : @NO}];
     const gfx::IntSize sourceSize = aSource->GetSize();
     const gfx::IntSize destinationSize = aDestination->GetSize();
-    CIImage* image =
+    CIImage* foreground =
         [CIImage imageWithIOSurface:aSource->GetIOSurfaceRef().get()];
-    image = [image imageByApplyingTransform:CGAffineTransformMakeScale(
-        static_cast<double>(destinationSize.width) / sourceSize.width,
-        static_cast<double>(destinationSize.height) / sourceSize.height)];
+    foreground = [foreground imageByApplyingTransform:CGAffineTransformMakeTranslation(
+                                 (destinationSize.width - sourceSize.width) / 2,
+                                 (destinationSize.height - sourceSize.height) / 2)];
+    CIImage* background =
+        [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:1]]
+            imageByCroppingToRect:CGRectMake(0, 0, destinationSize.width,
+                                             destinationSize.height)];
+    CIImage* image = [foreground imageByCompositingOverImage:background];
     CIRenderDestination* destination =
         [[[CIRenderDestination alloc]
             initWithIOSurface:(IOSurface*)aDestination->GetIOSurfaceRef().get()]

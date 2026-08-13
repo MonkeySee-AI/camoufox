@@ -100,7 +100,7 @@ def viewer_html(codec: str) -> bytes:
 <meta charset=utf-8><title>Rotunda low-latency selector stream</title>
 <style>
 html,body{{margin:0;height:100%;background:#080b12;color:white;font:14px system-ui}}
-body{{display:grid;place-items:center;overflow:hidden}}canvas{{width:100%;height:100%;object-fit:contain}}
+body{{display:grid;place-items:center;overflow:hidden}}canvas{{max-width:none;max-height:none}}
 #stats{{position:fixed;top:12px;left:12px;padding:7px 10px;border-radius:7px;background:#000a}}
 </style>
 <canvas></canvas><div id=stats>connecting…</div>
@@ -156,6 +156,9 @@ requestAnimationFrame(present);
       const width=view.getUint32(21),height=view.getUint32(25);
       if(!window.__streamWidth){{
         canvas.width=width;canvas.height=height;
+        const rasterScale=Math.min(2,Math.max(1,width/1280,height/720));
+        canvas.style.width=`${{width/rasterScale}}px`;
+        canvas.style.height=`${{height/rasterScale}}px`;
         window.__streamWidth=width;window.__streamHeight=height;
       }}
       if(started||key){{

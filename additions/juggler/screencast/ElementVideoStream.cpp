@@ -5,6 +5,7 @@
 #include "ElementVideoStream.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "EncoderConfig.h"
 #include "MediaData.h"
@@ -69,13 +70,24 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     return Err(StreamError("Element paint did not produce a root surface"_ns));
   }
 
+  const double canvasScale =
+      std::min({1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
+  const gfx::IntSize logicalSize(
+      std::max(2, static_cast<int32_t>(aOutputSize.width * canvasScale)),
+      std::max(2, static_cast<int32_t>(aOutputSize.height * canvasScale)));
+  const double fitScale =
+      std::min({1.0, static_cast<double>(logicalSize.width) / root->mSize.width,
+                static_cast<double>(logicalSize.height) / root->mSize.height});
+  const double pixelScale = std::min(2.0, 1.0 / canvasScale);
+  const double scale = fitScale * pixelScale;
+  const gfx::Size fitted(root->mSize.width * scale,
+                         root->mSize.height * scale);
+
   RefPtr<gfx::DrawTarget> outputTarget;
 #ifdef XP_MACOSX
-  const double stagingScale =
-      std::min({1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
   const gfx::IntSize renderSize(
-      std::max(2, static_cast<int32_t>(aOutputSize.width * stagingScale)),
-      std::max(2, static_cast<int32_t>(aOutputSize.height * stagingScale)));
+      std::max(2, static_cast<int32_t>(std::ceil(fitted.width))),
+      std::max(2, static_cast<int32_t>(std::ceil(fitted.height))));
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
       renderSize.width, renderSize.height, false);
   if (!staging || !staging->Lock(false)) {
@@ -97,14 +109,14 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   outputTarget->FillRect(
       gfx::Rect(gfx::Point(), gfx::Size(renderSize)),
       gfx::ColorPattern(gfx::DeviceColor(0, 0, 0, 1)));
-  const double scale =
-      std::min(static_cast<double>(renderSize.width) / root->mSize.width,
-               static_cast<double>(renderSize.height) / root->mSize.height);
-  const gfx::Size fitted(root->mSize.width * scale,
-                         root->mSize.height * scale);
+#ifdef XP_MACOSX
+  const gfx::Point offset(0, 0);
+#else
+  const gfx::Point offset((renderSize.width - fitted.width) / 2,
+                          (renderSize.height - fitted.height) / 2);
+#endif
   gfx::Matrix fit = gfx::Matrix::Scaling(scale, scale).PostTranslate(
-      (renderSize.width - fitted.width) / 2,
-      (renderSize.height - fitted.height) / 2);
+      offset.x, offset.y);
   gfx::InlineTranslator translator(outputTarget, nullptr);
   translator.SetReferenceDrawTargetTransform(fit);
   translator.SetDependentSurfaces(&aFragments);
@@ -129,8 +141,8 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   if (!aIOSurface) {
     return Err(StreamError("Could not allocate the output IOSurface"_ns));
   }
-  if (!ScaleElementVideoSurface(staging, aIOSurface)) {
-    return Err(StreamError("Could not scale the IOSurface video frame"_ns));
+  if (!CompositeElementVideoSurface(staging, aIOSurface)) {
+    return Err(StreamError("Could not composite the IOSurface video frame"_ns));
   }
   return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
 #else
