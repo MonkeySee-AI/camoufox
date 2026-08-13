@@ -21,6 +21,7 @@ function patchValidator(validatorFilename) {
     fps: tOptional(tInt),
     video: tOptional(tBoolean),
     bitrate: tOptional(tInt),
+    codec: tOptional(tString),
   });
 }
 
@@ -61,6 +62,7 @@ function patchPageDispatcher(dispatcherModule) {
         fps: params.fps ?? 25,
         video: params.video ?? false,
         bitrate: params.bitrate ?? 12000000,
+        codec: params.codec ?? "h264",
         width: params.size?.width,
         height: params.size?.height,
         frameId: element._context.frame._id,

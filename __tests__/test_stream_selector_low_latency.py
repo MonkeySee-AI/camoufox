@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 from pathlib import Path
 
 import pytest
@@ -13,40 +12,15 @@ STREAM = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(STREAM)
 
 
-def mp4_box(kind: bytes, body: bytes, *, extended: bool = False) -> bytes:
-    if extended:
-        return b"\0\0\0\1" + kind + (16 + len(body)).to_bytes(8, "big") + body
-    return (8 + len(body)).to_bytes(4, "big") + kind + body
-
-
-def test_read_mp4_box_handles_regular_and_extended_headers() -> None:
-    # FFmpeg can use either MP4 size header; preserving the original bytes lets
-    # the HTTP path forward boxes without remuxing or copying their payloads.
-    regular = mp4_box(b"ftyp", b"abc")
-    extended = mp4_box(b"mdat", b"payload", extended=True)
-    source = io.BytesIO(regular + extended)
-
-    assert STREAM.read_mp4_box(source) == (b"ftyp", regular)
-    assert STREAM.read_mp4_box(source) == (b"mdat", extended)
-    assert STREAM.read_mp4_box(source) is None
-
-
-def test_read_mp4_box_rejects_truncated_payload() -> None:
-    # A partial encoder write must close the stream rather than forwarding a
-    # malformed media segment that permanently poisons the browser SourceBuffer.
-    with pytest.raises(EOFError, match="truncated"):
-        STREAM.read_mp4_box(io.BytesIO((20).to_bytes(4, "big") + b"mdat" + b"short"))
-
-
-def test_fragment_stream_preserves_encoded_order() -> None:
+def test_native_packet_stream_preserves_encoded_order() -> None:
     # Source images may be dropped before encoding, but dependent H.264 frames
     # must remain ordered once the encoder has emitted them.
-    fragments = STREAM.FragmentStream()
-    fragments.update(b"one")
-    fragments.update(b"two")
+    packets = STREAM.NativePacketStream()
+    packets.update(b"one")
+    packets.update(b"two")
 
-    sequence, first = fragments.wait_for_next(0)
-    next_sequence, second = fragments.wait_for_next(sequence)
+    sequence, first = packets.wait_for_next(0)
+    next_sequence, second = packets.wait_for_next(sequence)
 
     assert (sequence, first) == (1, b"one")
     assert (next_sequence, second) == (2, b"two")
@@ -91,3 +65,8 @@ def test_h264_level_matches_fixed_encoder_canvas(
     size: tuple[int, int], expected: tuple[str, str]
 ) -> None:
     assert STREAM.h264_level(*size) == expected
+
+
+def test_h265_uses_hevc_annex_b_and_4k60_webcodecs_codec() -> None:
+    # The macOS 4K60 path uses HEVC Annex B directly in Chrome WebCodecs.
+    assert STREAM.web_codec("h265", 3840, 2160) == "hvc1.1.6.L156.B0"

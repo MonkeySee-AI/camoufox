@@ -993,6 +993,7 @@ const Page = {
         fps: t.Optional(t.Number),
         video: t.Optional(t.Boolean),
         bitrate: t.Optional(t.Number),
+        codec: t.Optional(t.String),
       },
       returns: {
         screencastId: t.String,

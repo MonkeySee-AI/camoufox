@@ -8,6 +8,7 @@
 #include "MediaResult.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 
 class MacIOSurface;
@@ -27,6 +28,7 @@ class ElementVideoStream final {
     uint32_t mHeight;
     uint32_t mFramesPerSecond;
     uint32_t mBitsPerSecond;
+    bool mH265;
 
     bool operator==(const Options& aOther) const = default;
   };
@@ -44,11 +46,22 @@ class ElementVideoStream final {
   void Shutdown();
 
  private:
+  struct PendingEncode {
+    gfx::CrossProcessPaint::ResolvedFragmentMap mFragments;
+    uint64_t mFrameIndex;
+    RefPtr<EncodePromise::Private> mPromise;
+  };
+
   explicit ElementVideoStream(const Options& aOptions);
   ~ElementVideoStream();
+  void EncodeNow(PendingEncode&& aEncode);
+  void EncodeDone();
 
   Options mOptions;
   RefPtr<EncoderAgent> mEncoder;
+  UniquePtr<PendingEncode> mPendingEncode;
+  bool mPipelined = false;
+  bool mEncoding = false;
   bool mShutdown = false;
 
 #ifdef XP_MACOSX

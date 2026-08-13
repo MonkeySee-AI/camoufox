@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 STREAM_CPP = ROOT / "additions/juggler/screencast/ElementVideoStream.cpp"
+STREAM_MAC = ROOT / "additions/juggler/screencast/ElementVideoStreamMac.mm"
 MOZ_BUILD = ROOT / "additions/juggler/screencast/moz.build"
 NATIVE_PATCH = ROOT / "patches/native-element-snapshot.patch"
 
@@ -16,6 +17,11 @@ def test_shared_stream_keeps_platform_encoders_behind_gecko_contract() -> None:
     assert "SourceSurfaceImage" in source
     assert "VideoToolbox" not in source
     assert "Media Foundation" not in source
+    assert "mPendingEncode" in source
+    assert "mPendingEncode->mPromise->Resolve(nsCString()" in source
+    assert "CreateBiPlanarSurface" in source
+    assert "YUV420SP_NV12" in source
+    assert "startTaskToRender" in STREAM_MAC.read_text()
 
 
 def test_build_contract_includes_shared_media_encoder_headers() -> None:
@@ -24,6 +30,7 @@ def test_build_contract_includes_shared_media_encoder_headers() -> None:
     source = MOZ_BUILD.read_text()
 
     assert "'ElementVideoStream.cpp'" in source
+    assert "'ElementVideoStreamMac.mm'" in source
     assert "'/dom/media/platforms'" in source
     assert "'/dom/media/webcodecs'" in source
 

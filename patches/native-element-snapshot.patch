@@ -1,8 +1,8 @@
 diff --git a/dom/chrome-webidl/WindowGlobalActors.webidl b/dom/chrome-webidl/WindowGlobalActors.webidl
-index a1f031ffe2..a92005aaf2 100644
+index a1f031ffe2..f3127df373 100644
 --- a/dom/chrome-webidl/WindowGlobalActors.webidl
 +++ b/dom/chrome-webidl/WindowGlobalActors.webidl
-@@ -217,4 +217,20 @@ interface WindowGlobalChild {
+@@ -217,4 +217,21 @@ interface WindowGlobalChild {
    [Throws]
    JSWindowActorChild getActor(UTF8String name);
    JSWindowActorChild? getExistingActor(UTF8String name);
@@ -12,22 +12,23 @@ index a1f031ffe2..a92005aaf2 100644
 +  Promise<DOMString> drawElementSnapshot(Element element,
 +                                         optional double scale = 1.0);
 +
-+  /** Paint an element subtree and encode it into a persistent H.264 stream. */
++  /** Paint an element subtree and encode it into a persistent native stream. */
 +  [NewObject]
 +  Promise<DOMString> encodeElementVideoFrame(Element element,
 +                                             unsigned long width,
 +                                             unsigned long height,
 +                                             unsigned long fps,
 +                                             unsigned long bitsPerSecond,
++                                             UTF8String codec,
 +                                             unsigned long long frameIndex);
 +  [NewObject]
 +  Promise<boolean> stopElementVideoStream();
  };
 diff --git a/dom/ipc/PWindowGlobal.ipdl b/dom/ipc/PWindowGlobal.ipdl
-index 91dc9ac48f..e5e1f5e0bd 100644
+index 91dc9ac48f..2778c370a4 100644
 --- a/dom/ipc/PWindowGlobal.ipdl
 +++ b/dom/ipc/PWindowGlobal.ipdl
-@@ -107,6 +107,18 @@ both:
+@@ -107,6 +107,19 @@ both:
                     nullable StructuredCloneData aStack);
  
  parent:
@@ -39,6 +40,7 @@ index 91dc9ac48f..e5e1f5e0bd 100644
 +                                uint32_t aHeight,
 +                                uint32_t aFramesPerSecond,
 +                                uint32_t aBitsPerSecond,
++                                nsCString aCodec,
 +                                uint64_t aFrameIndex)
 +    returns (nsCString data);
 +  async StopElementVideoStream() returns (bool stopped);
@@ -47,7 +49,7 @@ index 91dc9ac48f..e5e1f5e0bd 100644
    // BrowsingContext. aTargetBC must be in the same BrowsingContextGroup as this
    // window global.
 diff --git a/dom/ipc/WindowGlobalChild.cpp b/dom/ipc/WindowGlobalChild.cpp
-index ceb57c0341..7c54d72afe 100644
+index ceb57c0341..fb3c741397 100644
 --- a/dom/ipc/WindowGlobalChild.cpp
 +++ b/dom/ipc/WindowGlobalChild.cpp
 @@ -36,6 +36,7 @@
@@ -58,7 +60,7 @@ index ceb57c0341..7c54d72afe 100644
  #include "mozilla/ipc/Endpoint.h"
  #include "nsContentUtils.h"
  #include "nsDocShell.h"
-@@ -796,6 +797,100 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
+@@ -796,6 +797,102 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
    return JSActorManager::GetExistingActor(aName).downcast<JSWindowActorChild>();
  }
  
@@ -101,7 +103,7 @@ index ceb57c0341..7c54d72afe 100644
 +already_AddRefed<Promise> WindowGlobalChild::EncodeElementVideoFrame(
 +    Element& aElement, uint32_t aWidth, uint32_t aHeight,
 +    uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
-+    uint64_t aFrameIndex, ErrorResult& aRv) {
++    const nsACString& aCodec, uint64_t aFrameIndex, ErrorResult& aRv) {
 +  RefPtr<Promise> promise = Promise::Create(mWindowGlobal->AsGlobal(), aRv);
 +  if (aRv.Failed()) {
 +    return nullptr;
@@ -109,7 +111,8 @@ index ceb57c0341..7c54d72afe 100644
 +  if (aElement.OwnerDoc() != mWindowGlobal->GetExtantDoc() || aWidth < 2 ||
 +      aHeight < 2 || aWidth > 8192 || aHeight > 8192 || aWidth % 2 ||
 +      aHeight % 2 || aFramesPerSecond < 1 || aFramesPerSecond > 60 ||
-+      aBitsPerSecond < 1000 || aBitsPerSecond > 500000000) {
++      aBitsPerSecond < 1000 || aBitsPerSecond > 500000000 ||
++      (!aCodec.EqualsLiteral("h264") && !aCodec.EqualsLiteral("h265"))) {
 +    promise->MaybeReject(NS_ERROR_INVALID_ARG);
 +    return promise.forget();
 +  }
@@ -122,7 +125,8 @@ index ceb57c0341..7c54d72afe 100644
 +  }
 +
 +  SendEncodeElementVideoFrame(std::move(fragment), aWidth, aHeight,
-+                              aFramesPerSecond, aBitsPerSecond, aFrameIndex)
++                              aFramesPerSecond, aBitsPerSecond,
++                              nsCString(aCodec), aFrameIndex)
 +      ->Then(GetCurrentSerialEventTarget(), __func__,
 +             [promise](PWindowGlobalChild::EncodeElementVideoFramePromise::
 +                           ResolveOrRejectValue&& aResult) {
@@ -160,7 +164,7 @@ index ceb57c0341..7c54d72afe 100644
      JS::Handle<JSObject*> aMaybeActor, const nsACString& aName,
      ErrorResult& aRv) {
 diff --git a/dom/ipc/WindowGlobalChild.h b/dom/ipc/WindowGlobalChild.h
-index 956a5313b4..045671ab77 100644
+index 956a5313b4..ad5e2f66ad 100644
 --- a/dom/ipc/WindowGlobalChild.h
 +++ b/dom/ipc/WindowGlobalChild.h
 @@ -25,6 +25,7 @@ class WindowGlobalParent;
@@ -181,14 +185,14 @@ index 956a5313b4..045671ab77 100644
 +  already_AddRefed<Promise> EncodeElementVideoFrame(
 +      Element& aElement, uint32_t aWidth, uint32_t aHeight,
 +      uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
-+      uint64_t aFrameIndex, ErrorResult& aRv);
++      const nsACString& aCodec, uint64_t aFrameIndex, ErrorResult& aRv);
 +  already_AddRefed<Promise> StopElementVideoStream(ErrorResult& aRv);
 +
    nsISupports* GetParentObject();
    JSObject* WrapObject(JSContext* aCx,
                         JS::Handle<JSObject*> aGivenProto) override;
 diff --git a/dom/ipc/WindowGlobalParent.cpp b/dom/ipc/WindowGlobalParent.cpp
-index b2a1203401..9b372c2eb1 100644
+index b2a1203401..bb5feef4cb 100644
 --- a/dom/ipc/WindowGlobalParent.cpp
 +++ b/dom/ipc/WindowGlobalParent.cpp
 @@ -5,8 +5,12 @@
@@ -222,7 +226,7 @@ index b2a1203401..9b372c2eb1 100644
  #include "mozilla/ipc/ProtocolUtils.h"
  #include "mozilla/net/CookieServiceParent.h"
  #include "mozilla/net/NeckoParent.h"
-@@ -1112,6 +1120,152 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
+@@ -1112,6 +1120,158 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
    return promise.forget();
  }
  
@@ -290,9 +294,15 @@ index b2a1203401..9b372c2eb1 100644
 +mozilla::ipc::IPCResult WindowGlobalParent::RecvEncodeElementVideoFrame(
 +    gfx::PaintFragment&& aFragment, uint32_t aWidth, uint32_t aHeight,
 +    uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
-+    uint64_t aFrameIndex, EncodeElementVideoFrameResolver&& aResolve) {
++    const nsCString& aCodec, uint64_t aFrameIndex,
++    EncodeElementVideoFrameResolver&& aResolve) {
++  if (!aCodec.EqualsLiteral("h264") && !aCodec.EqualsLiteral("h265")) {
++    aResolve(nsCString());
++    return IPC_OK();
++  }
 +  const ElementVideoStream::Options options{
-+      aWidth, aHeight, aFramesPerSecond, aBitsPerSecond};
++      aWidth, aHeight, aFramesPerSecond, aBitsPerSecond,
++      aCodec.EqualsLiteral("h265")};
 +  RefPtr<gfx::CrossProcessPaint::ResolvePromise> paint =
 +      gfx::CrossProcessPaint::Start(
 +          std::move(aFragment),
@@ -375,7 +385,7 @@ index b2a1203401..9b372c2eb1 100644
  void WindowGlobalParent::DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
                                                const Maybe<IntRect>& aRect,
                                                float aScale,
-@@ -1590,6 +1744,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
+@@ -1590,6 +1750,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
  }
  
  void WindowGlobalParent::ActorDestroy(ActorDestroyReason aWhy) {
@@ -387,7 +397,7 @@ index b2a1203401..9b372c2eb1 100644
      glean::orb::did_ever_block_response
          .EnumGet(mShouldReportHasBlockedOpaqueResponse
 diff --git a/dom/ipc/WindowGlobalParent.h b/dom/ipc/WindowGlobalParent.h
-index 5d14266e42..a02620d97d 100644
+index 5d14266e42..2051dedc70 100644
 --- a/dom/ipc/WindowGlobalParent.h
 +++ b/dom/ipc/WindowGlobalParent.h
 @@ -33,11 +33,13 @@ namespace mozilla {
@@ -404,7 +414,7 @@ index 5d14266e42..a02620d97d 100644
  class WindowGlobalChild;
  class JSWindowActorParent;
  class JSActorMessageMeta;
-@@ -295,6 +297,16 @@ class WindowGlobalParent final : public WindowContext,
+@@ -295,6 +297,17 @@ class WindowGlobalParent final : public WindowContext,
    mozilla::ipc::IPCResult RecvUpdateCookieJarSettings(
        const CookieJarSettingsArgs& aCookieJarSettingsArgs);
  
@@ -414,14 +424,15 @@ index 5d14266e42..a02620d97d 100644
 +  mozilla::ipc::IPCResult RecvEncodeElementVideoFrame(
 +      gfx::PaintFragment&& aFragment, uint32_t aWidth, uint32_t aHeight,
 +      uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
-+      uint64_t aFrameIndex, EncodeElementVideoFrameResolver&& aResolve);
++      const nsCString& aCodec, uint64_t aFrameIndex,
++      EncodeElementVideoFrameResolver&& aResolve);
 +  mozilla::ipc::IPCResult RecvStopElementVideoStream(
 +      StopElementVideoStreamResolver&& aResolve);
 +
    void ActorDestroy(ActorDestroyReason aWhy) override;
  
    void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
-@@ -390,6 +402,7 @@ class WindowGlobalParent final : public WindowContext,
+@@ -390,6 +403,7 @@ class WindowGlobalParent final : public WindowContext,
  
    nsCOMPtr<nsIURI> mDocumentURI;
    Maybe<nsString> mDocumentTitle;
@@ -429,8 +440,39 @@ index 5d14266e42..a02620d97d 100644
  
    Maybe<bool> mIsInitialDocument;
  
+diff --git a/dom/media/platforms/PlatformEncoderModule.h b/dom/media/platforms/PlatformEncoderModule.h
+index 7cd95aeff0..a2a16d4c2a 100644
+--- a/dom/media/platforms/PlatformEncoderModule.h
++++ b/dom/media/platforms/PlatformEncoderModule.h
+@@ -95,6 +95,13 @@ class MediaDataEncoder {
+         __func__);
+   }
+ 
++  // Realtime producers with their own bounded queue may submit another frame
++  // before the previous frame's output is ready. Callers must check support.
++  virtual bool SupportsPipelinedEncode() const { return false; }
++  virtual RefPtr<EncodePromise> EncodePipelined(const MediaData* aSample) {
++    return Encode(aSample);
++  }
++
+   // Attempt to reconfigure the encoder on the fly. This can fail if the
+   // underlying PEM doesn't support this type of reconfiguration.
+   virtual RefPtr<ReconfigurationPromise> Reconfigure(
+diff --git a/dom/media/platforms/apple/AppleEncoderModule.cpp b/dom/media/platforms/apple/AppleEncoderModule.cpp
+index b6153658ba..8306c0dee5 100644
+--- a/dom/media/platforms/apple/AppleEncoderModule.cpp
++++ b/dom/media/platforms/apple/AppleEncoderModule.cpp
+@@ -22,7 +22,7 @@ extern LazyLogModule sPEMLog;
+           ("[AppleEncoderModule] %s: " fmt, __func__, ##__VA_ARGS__))
+ 
+ EncodeSupportSet AppleEncoderModule::SupportsCodec(CodecType aCodec) const {
+-  if (aCodec != CodecType::H264) {
++  if (aCodec != CodecType::H264 && aCodec != CodecType::H265) {
+     return EncodeSupportSet{};
+   }
+   return EncodeSupportSet{EncodeSupport::HardwareEncode,
 diff --git a/dom/media/platforms/apple/AppleVTEncoder.cpp b/dom/media/platforms/apple/AppleVTEncoder.cpp
-index cfff60b3c1..e6316f6757 100644
+index cfff60b3c1..a776b2ecbe 100644
 --- a/dom/media/platforms/apple/AppleVTEncoder.cpp
 +++ b/dom/media/platforms/apple/AppleVTEncoder.cpp
 @@ -14,6 +14,7 @@
@@ -441,7 +483,228 @@ index cfff60b3c1..e6316f6757 100644
  
  namespace mozilla {
  extern LazyLogModule sPEMLog;
-@@ -1042,6 +1043,18 @@ static void ReleaseImage(void* aImageGrip, const void* aDataPtr,
+@@ -62,8 +63,14 @@ static CFDictionaryRef BuildEncoderSpec(const bool aHardwareNotAllowed,
+ static void FrameCallback(void* aEncoder, void* aFrameRefCon, OSStatus aStatus,
+                           VTEncodeInfoFlags aInfoFlags,
+                           CMSampleBufferRef aSampleBuffer) {
+-  (static_cast<AppleVTEncoder*>(aEncoder))
+-      ->OutputFrame(aStatus, aInfoFlags, aSampleBuffer);
++  AppleVTEncoder* encoder = static_cast<AppleVTEncoder*>(aEncoder);
++  if (aFrameRefCon) {
++    encoder->OutputPipelinedFrame(
++        static_cast<MediaDataEncoder::EncodePromise::Private*>(aFrameRefCon),
++        aStatus, aInfoFlags, aSampleBuffer);
++  } else {
++    encoder->OutputFrame(aStatus, aInfoFlags, aSampleBuffer);
++  }
+ }
+ 
+ bool AppleVTEncoder::SetAverageBitrate(uint32_t aBitsPerSec) {
+@@ -421,13 +428,16 @@ MediaResult AppleVTEncoder::InitSession() {
+        lowLatencyRateControl ? "yes" : "no",
+        mHardwareNotAllowed ? "no" : "yes");
+   AutoCFTypeRef<CFDictionaryRef> spec(
+-      BuildEncoderSpec(mHardwareNotAllowed, lowLatencyRateControl));
++      BuildEncoderSpec(mHardwareNotAllowed,
++                       lowLatencyRateControl && mConfig.mCodec == CodecType::H264));
+ 
+   // Bug 1955153: Set sourceImageBufferAttributes using the pixel format derived
+   // from mConfig.mFormat.
+   OSStatus status = VTCompressionSessionCreate(
+       kCFAllocatorDefault, mConfig.mSize.width, mConfig.mSize.height,
+-      kCMVideoCodecType_H264, spec, nullptr /* sourceImageBufferAttributes */,
++      mConfig.mCodec == CodecType::H265 ? kCMVideoCodecType_HEVC
++                                       : kCMVideoCodecType_H264,
++      spec, nullptr /* sourceImageBufferAttributes */,
+       kCFAllocatorDefault, &FrameCallback, this /* outputCallbackRefCon */,
+       mSession.Receive());
+   if (status != noErr) {
+@@ -580,10 +590,16 @@ static bool IsKeyframe(CMSampleBufferRef aSample) {
+       kCMSampleAttachmentKey_NotSync);
+ }
+ 
+-static size_t GetNumParamSets(CMFormatDescriptionRef aDescription) {
++static size_t GetNumParamSets(CMFormatDescriptionRef aDescription,
++                              CodecType aCodec) {
+   size_t numParamSets = 0;
+-  OSStatus status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+-      aDescription, 0, nullptr, nullptr, &numParamSets, nullptr);
++  OSStatus status = aCodec == CodecType::H265
++                        ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
++                              aDescription, 0, nullptr, nullptr, &numParamSets,
++                              nullptr)
++                        : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
++                              aDescription, 0, nullptr, nullptr, &numParamSets,
++                              nullptr);
+   if (status != noErr) {
+     LOGE("Cannot get number of parameter sets from format description");
+   }
+@@ -594,12 +610,17 @@ static size_t GetNumParamSets(CMFormatDescriptionRef aDescription) {
+ static const uint8_t kNALUStart[4] = {0, 0, 0, 1};
+ 
+ static size_t GetParamSet(CMFormatDescriptionRef aDescription, size_t aIndex,
+-                          const uint8_t** aDataPtr) {
++                          const uint8_t** aDataPtr, CodecType aCodec) {
+   size_t length = 0;
+   int headerSize = 0;
+-  if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+-          aDescription, aIndex, aDataPtr, &length, nullptr, &headerSize) !=
+-      noErr) {
++  OSStatus status = aCodec == CodecType::H265
++                        ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
++                              aDescription, aIndex, aDataPtr, &length, nullptr,
++                              &headerSize)
++                        : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
++                              aDescription, aIndex, aDataPtr, &length, nullptr,
++                              &headerSize);
++  if (status != noErr) {
+     LOGE("failed to get parameter set from format description");
+     return 0;
+   }
+@@ -609,13 +630,14 @@ static size_t GetParamSet(CMFormatDescriptionRef aDescription, size_t aIndex,
+ }
+ 
+ static bool WriteSPSPPS(MediaRawData* aDst,
+-                        CMFormatDescriptionRef aDescription) {
++                        CMFormatDescriptionRef aDescription,
++                        CodecType aCodec) {
+   // Get SPS/PPS
+-  const size_t numParamSets = GetNumParamSets(aDescription);
++  const size_t numParamSets = GetNumParamSets(aDescription, aCodec);
+   UniquePtr<MediaRawDataWriter> writer(aDst->CreateWriter());
+   for (size_t i = 0; i < numParamSets; i++) {
+     const uint8_t* data = nullptr;
+-    size_t length = GetParamSet(aDescription, i, &data);
++    size_t length = GetParamSet(aDescription, i, &data, aCodec);
+     if (length == 0) {
+       return false;
+     }
+@@ -674,7 +696,7 @@ bool AppleVTEncoder::WriteExtraData(MediaRawData* aDst, CMSampleBufferRef aSrc,
+   }
+ 
+   if (aAsAnnexB) {
+-    return WriteSPSPPS(aDst, desc);
++    return WriteSPSPPS(aDst, desc, mConfig.mCodec);
+   }
+ 
+   RefPtr<MediaByteBuffer> avcc = extractAvcc(desc);
+@@ -798,6 +820,18 @@ void AppleVTEncoder::OutputFrame(OSStatus aStatus, VTEncodeInfoFlags aFlags,
+   ProcessOutput(succeeded ? std::move(output) : nullptr, EncodeResult::Success);
+ }
+ 
++void AppleVTEncoder::OutputPipelinedFrame(EncodePromise::Private* aPromise,
++                                          OSStatus aStatus,
++                                          VTEncodeInfoFlags aFlags,
++                                          CMSampleBufferRef aBuffer) {
++  RefPtr<EncodePromise::Private> promise = aPromise;
++  OutputFrame(aStatus, aFlags, aBuffer);
++  RefPtr<AppleVTEncoder> self = this;
++  (void)mTaskQueue->Dispatch(NS_NewRunnableFunction(
++      "AppleVTEncoder::CompletePipelinedEncode",
++      [self, promise] { self->CompletePipelinedEncode(promise); }));
++}
++
+ void AppleVTEncoder::ProcessOutput(RefPtr<MediaRawData>&& aOutput,
+                                    EncodeResult aResult) {
+   if (!mTaskQueue->IsCurrentThreadIn()) {
+@@ -869,6 +903,21 @@ RefPtr<MediaDataEncoder::EncodePromise> AppleVTEncoder::Encode(
+   });
+ }
+ 
++RefPtr<MediaDataEncoder::EncodePromise> AppleVTEncoder::EncodePipelined(
++    const MediaData* aSample) {
++  MOZ_ASSERT(aSample);
++  RefPtr<const VideoData> sample(aSample->As<const VideoData>());
++  RefPtr<EncodePromise::Private> promise =
++      MakeRefPtr<EncodePromise::Private>(__func__);
++  RefPtr<AppleVTEncoder> self = this;
++  (void)mTaskQueue->Dispatch(NS_NewRunnableFunction(
++      __func__, [self, sample, promise] {
++        self->mPipelinedPromises.AppendElement(promise);
++        self->ProcessPipelinedEncode(sample, promise);
++      }));
++  return promise;
++}
++
+ // TODO(Bug 1984936): For realtime mode, resolve the promise after the first
+ // sample's result is available, then continue processing remaining samples.
+ // This allows the caller to keep submitting new samples while the encoder
+@@ -954,6 +1003,74 @@ void AppleVTEncoder::ProcessEncode(const RefPtr<const VideoData>& aSample) {
+   ForceOutputIfNeeded();
+ }
+ 
++void AppleVTEncoder::ProcessPipelinedEncode(
++    const RefPtr<const VideoData>& aSample,
++    const RefPtr<EncodePromise::Private>& aPromise) {
++  AssertOnTaskQueue();
++  if (!mSession) {
++    mPipelinedPromises.RemoveElement(aPromise);
++    aPromise->Reject(
++        MediaResult(NS_ERROR_DOM_MEDIA_CANCELED, "Encoder is stopped"_ns),
++        __func__);
++    return;
++  }
++
++  AutoCVBufferRef<CVImageBufferRef> buffer(
++      CreateCVPixelBuffer(aSample->mImage));
++  if (!buffer) {
++    mPipelinedPromises.RemoveElement(aPromise);
++    aPromise->Reject(
++        MediaResult(NS_ERROR_OUT_OF_MEMORY, "failed to allocate buffer"_ns),
++        __func__);
++    return;
++  }
++
++  CFDictionaryRef frameProps = nullptr;
++  if (aSample->mKeyframe) {
++    const void* keys[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
++    const void* values[] = {kCFBooleanTrue};
++    frameProps = CFDictionaryCreate(
++        kCFAllocatorDefault, keys, values, std::size(keys),
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++  }
++  auto releaseProps = MakeScopeExit([&] {
++    if (frameProps) {
++      CFRelease(frameProps);
++    }
++  });
++
++  VTEncodeInfoFlags info;
++  OSStatus status = VTCompressionSessionEncodeFrame(
++      mSession, buffer,
++      CMTimeMake(aSample->mTime.ToMicroseconds(), USECS_PER_S),
++      CMTimeMake(aSample->mDuration.ToMicroseconds(), USECS_PER_S), frameProps,
++      aPromise.get(), &info);
++  if (status != noErr) {
++    mPipelinedPromises.RemoveElement(aPromise);
++    aPromise->Reject(
++        MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
++                    "VTCompressionSessionEncodeFrame error"_ns),
++        __func__);
++  }
++}
++
++void AppleVTEncoder::CompletePipelinedEncode(
++    const RefPtr<EncodePromise::Private>& aPromise) {
++  AssertOnTaskQueue();
++  if (!mPipelinedPromises.RemoveElement(aPromise)) {
++    return;
++  }
++  if (NS_FAILED(mError)) {
++    MediaResult error = std::move(mError);
++    mError = NS_OK;
++    aPromise->Reject(std::move(error), __func__);
++    return;
++  }
++  EncodedData output = std::move(mEncodedData);
++  mEncodedData = EncodedData();
++  aPromise->Resolve(std::move(output), __func__);
++}
++
+ RefPtr<MediaDataEncoder::ReconfigurationPromise>
+ AppleVTEncoder::ProcessReconfigure(
+     const RefPtr<const EncoderConfigurationChangeList>& aConfigurationChanges) {
+@@ -1042,6 +1159,18 @@ static void ReleaseImage(void* aImageGrip, const void* aDataPtr,
  CVPixelBufferRef AppleVTEncoder::CreateCVPixelBuffer(Image* aSource) {
    AssertOnTaskQueue();
  
@@ -460,6 +723,117 @@ index cfff60b3c1..e6316f6757 100644
    auto sfr = EncoderConfig::SampleFormat::FromImage(aSource);
    if (sfr.isErr()) {
      MediaResult err = sfr.unwrapErr();
+@@ -1207,14 +1336,24 @@ RefPtr<ShutdownPromise> AppleVTEncoder::Shutdown() {
+ RefPtr<ShutdownPromise> AppleVTEncoder::ProcessShutdown() {
+   LOGD("::ProcessShutdown");
+   AssertOnTaskQueue();
++  if (mSession) {
++    (void)VTCompressionSessionCompleteFrames(mSession, kCMTimeIndefinite);
++  }
+   InvalidateSessionIfNeeded();
+ 
+-  mIsHardwareAccelerated = false;
+-  mError = MediaResult(NS_ERROR_DOM_MEDIA_CANCELED, "Canceled in shutdown"_ns);
+-  MaybeResolveOrRejectEncodePromise();
+-  mError = NS_OK;
+-
+-  return ShutdownPromise::CreateAndResolve(true, __func__);
++  RefPtr<AppleVTEncoder> self = this;
++  return InvokeAsync(mTaskQueue, __func__, [self] {
++    self->mIsHardwareAccelerated = false;
++    self->mError =
++        MediaResult(NS_ERROR_DOM_MEDIA_CANCELED, "Canceled in shutdown"_ns);
++    self->MaybeResolveOrRejectEncodePromise();
++    for (const auto& promise : self->mPipelinedPromises) {
++      promise->Reject(self->mError, __func__);
++    }
++    self->mPipelinedPromises.Clear();
++    self->mError = NS_OK;
++    return ShutdownPromise::CreateAndResolve(true, __func__);
++  });
+ }
+ 
+ RefPtr<GenericPromise> AppleVTEncoder::SetBitrate(uint32_t aBitsPerSec) {
+diff --git a/dom/media/platforms/apple/AppleVTEncoder.h b/dom/media/platforms/apple/AppleVTEncoder.h
+index 939313d0a8..02d9e60227 100644
+--- a/dom/media/platforms/apple/AppleVTEncoder.h
++++ b/dom/media/platforms/apple/AppleVTEncoder.h
+@@ -37,6 +37,8 @@ class AppleVTEncoder final : public MediaDataEncoder {
+   RefPtr<InitPromise> Init() override;
+   RefPtr<EncodePromise> Encode(const MediaData* aSample) override;
+   RefPtr<EncodePromise> Encode(nsTArray<RefPtr<MediaData>>&& aSamples) override;
++  bool SupportsPipelinedEncode() const override { return true; }
++  RefPtr<EncodePromise> EncodePipelined(const MediaData* aSample) override;
+   RefPtr<ReconfigurationPromise> Reconfigure(
+       const RefPtr<const EncoderConfigurationChangeList>& aConfigurationChanges)
+       override;
+@@ -54,12 +56,19 @@ class AppleVTEncoder final : public MediaDataEncoder {
+ 
+   void OutputFrame(OSStatus aStatus, VTEncodeInfoFlags aFlags,
+                    CMSampleBufferRef aBuffer);
+-
++  void OutputPipelinedFrame(EncodePromise::Private* aPromise,
++                            OSStatus aStatus, VTEncodeInfoFlags aFlags,
++                            CMSampleBufferRef aBuffer);
+  private:
+   enum class EncodeResult { Success, EncodeError, FrameDropped, EmptyBuffer };
+ 
+   virtual ~AppleVTEncoder() { MOZ_ASSERT(!mSession); }
+   void ProcessEncode(const RefPtr<const VideoData>& aSample);
++  void ProcessPipelinedEncode(
++      const RefPtr<const VideoData>& aSample,
++      const RefPtr<EncodePromise::Private>& aPromise);
++  void CompletePipelinedEncode(
++      const RefPtr<EncodePromise::Private>& aPromise);
+   RefPtr<ReconfigurationPromise> ProcessReconfigure(
+       const RefPtr<const EncoderConfigurationChangeList>&
+           aConfigurationChanges);
+@@ -99,6 +108,7 @@ class AppleVTEncoder final : public MediaDataEncoder {
+   MozPromiseHolder<EncodePromise> mEncodePromise;
+   MozPromiseHolder<EncodePromise> mEncodeBatchPromise;
+   MozPromiseRequestHolder<EncodePromise> mEncodeBatchRequest;
++  nsTArray<RefPtr<EncodePromise::Private>> mPipelinedPromises;
+   RefPtr<MediaByteBuffer> mAvcc;  // Stores latest avcC data.
+   MediaResult mError;
+ 
+diff --git a/dom/media/webcodecs/EncoderAgent.cpp b/dom/media/webcodecs/EncoderAgent.cpp
+index d2b8c47b6d..f5e1fb7eaa 100644
+--- a/dom/media/webcodecs/EncoderAgent.cpp
++++ b/dom/media/webcodecs/EncoderAgent.cpp
+@@ -339,6 +339,20 @@ RefPtr<EncoderAgent::EncodePromise> EncoderAgent::Encode(
+   return p;
+ }
+ 
++bool EncoderAgent::SupportsPipelinedEncode() const {
++  MOZ_ASSERT(mOwnerThread->IsOnCurrentThread());
++  return mState == State::Configured && mEncoder &&
++         mEncoder->SupportsPipelinedEncode();
++}
++
++RefPtr<EncoderAgent::EncodePromise> EncoderAgent::EncodePipelined(
++    const MediaData* aInput) {
++  MOZ_ASSERT(mOwnerThread->IsOnCurrentThread());
++  MOZ_ASSERT(mState == State::Configured);
++  MOZ_ASSERT(mEncoder && mEncoder->SupportsPipelinedEncode());
++  return mEncoder->EncodePipelined(aInput);
++}
++
+ RefPtr<EncoderAgent::EncodePromise> EncoderAgent::Drain() {
+   MOZ_ASSERT(mOwnerThread->IsOnCurrentThread());
+   // This can be called when reconfiguring the encoder.
+diff --git a/dom/media/webcodecs/EncoderAgent.h b/dom/media/webcodecs/EncoderAgent.h
+index 86b8a3062c..f5dee4f981 100644
+--- a/dom/media/webcodecs/EncoderAgent.h
++++ b/dom/media/webcodecs/EncoderAgent.h
+@@ -54,6 +54,8 @@ class EncoderAgent final {
+   RefPtr<ShutdownPromise> Shutdown();
+   using EncodePromise = MediaDataEncoder::EncodePromise;
+   RefPtr<EncodePromise> Encode(nsTArray<RefPtr<MediaData>>&& aInputs);
++  bool SupportsPipelinedEncode() const;
++  RefPtr<EncodePromise> EncodePipelined(const MediaData* aInput);
+   // WebCodecs's flush() flushes out all the pending encoded data in the
+   // encoder. It's called Drain internally.
+   RefPtr<EncodePromise> Drain();
 diff --git a/gfx/ipc/CrossProcessPaint.cpp b/gfx/ipc/CrossProcessPaint.cpp
 index baa8899738..611abc62e7 100644
 --- a/gfx/ipc/CrossProcessPaint.cpp

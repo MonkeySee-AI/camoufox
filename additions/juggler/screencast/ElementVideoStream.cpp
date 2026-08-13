@@ -17,6 +17,7 @@
 #include "nsThreadUtils.h"
 
 #ifdef XP_MACOSX
+#  include "ElementVideoStreamMac.h"
 #  include "mozilla/gfx/MacIOSurface.h"
 #  include "MacIOSurfaceImage.h"
 #endif
@@ -70,17 +71,21 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
 
   RefPtr<gfx::DrawTarget> outputTarget;
 #ifdef XP_MACOSX
-  if (!aIOSurface) {
-    aIOSurface = MacIOSurface::CreateIOSurface(
-        aOutputSize.width, aOutputSize.height, false);
-  }
-  if (!aIOSurface || !aIOSurface->Lock(false)) {
+  const double stagingScale =
+      std::min({1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
+  const gfx::IntSize renderSize(
+      std::max(2, static_cast<int32_t>(aOutputSize.width * stagingScale)),
+      std::max(2, static_cast<int32_t>(aOutputSize.height * stagingScale)));
+  RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
+      renderSize.width, renderSize.height, false);
+  if (!staging || !staging->Lock(false)) {
     return Err(StreamError("Could not lock an IOSurface video frame"_ns));
   }
-  auto unlock = MakeScopeExit([&] { aIOSurface->Unlock(false); });
+  auto unlock = MakeScopeExit([&] { staging->Unlock(false); });
   outputTarget =
-      aIOSurface->GetAsDrawTargetLocked(gfx::BackendType::SKIA);
+      staging->GetAsDrawTargetLocked(gfx::BackendType::SKIA);
 #else
+  const gfx::IntSize& renderSize = aOutputSize;
   outputTarget =
       gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
           aOutputSize, gfx::SurfaceFormat::B8G8R8X8);
@@ -90,16 +95,16 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   }
 
   outputTarget->FillRect(
-      gfx::Rect(gfx::Point(), gfx::Size(aOutputSize)),
+      gfx::Rect(gfx::Point(), gfx::Size(renderSize)),
       gfx::ColorPattern(gfx::DeviceColor(0, 0, 0, 1)));
   const double scale =
-      std::min(static_cast<double>(aOutputSize.width) / root->mSize.width,
-               static_cast<double>(aOutputSize.height) / root->mSize.height);
+      std::min(static_cast<double>(renderSize.width) / root->mSize.width,
+               static_cast<double>(renderSize.height) / root->mSize.height);
   const gfx::Size fitted(root->mSize.width * scale,
                          root->mSize.height * scale);
   gfx::Matrix fit = gfx::Matrix::Scaling(scale, scale).PostTranslate(
-      (aOutputSize.width - fitted.width) / 2,
-      (aOutputSize.height - fitted.height) / 2);
+      (renderSize.width - fitted.width) / 2,
+      (renderSize.height - fitted.height) / 2);
   gfx::InlineTranslator translator(outputTarget, nullptr);
   translator.SetReferenceDrawTargetTransform(fit);
   translator.SetDependentSurfaces(&aFragments);
@@ -111,8 +116,22 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   outputTarget->Flush();
 
 #ifdef XP_MACOSX
-  // ponytail: encode calls are serialized, so one IOSurface is enough until
-  // the encoder supports multiple frames in flight.
+  unlock.release();
+  staging->Unlock(false);
+  if (!aIOSurface || aIOSurface->GetSize() != aOutputSize) {
+    aIOSurface = MacIOSurface::CreateBiPlanarSurface(
+        aOutputSize,
+        gfx::IntSize(aOutputSize.width / 2, aOutputSize.height / 2),
+        gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT,
+        gfx::YUVColorSpace::BT709, gfx::TransferFunction::BT709,
+        gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8);
+  }
+  if (!aIOSurface) {
+    return Err(StreamError("Could not allocate the output IOSurface"_ns));
+  }
+  if (!ScaleElementVideoSurface(staging, aIOSurface)) {
+    return Err(StreamError("Could not scale the IOSurface video frame"_ns));
+  }
   return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
 #else
   RefPtr<gfx::SourceSurface> output = outputTarget->Snapshot();
@@ -142,12 +161,19 @@ RefPtr<ElementVideoStream::CreatePromise> ElementVideoStream::Create(
                                ? H264_LEVEL::H264_LEVEL_4_2
                                : H264_LEVEL::H264_LEVEL_3_2;
   EncoderConfig::CodecSpecific specific{void_t{}};
-  specific.emplace<H264Specific>(H264_PROFILE_BASE, level,
-                                 H264BitStreamFormat::ANNEXB);
+  if (!aOptions.mH265) {
+    specific.emplace<H264Specific>(H264_PROFILE_BASE, level,
+                                   H264BitStreamFormat::ANNEXB);
+  }
+#ifdef XP_MACOSX
+  const ImageBitmapFormat format = ImageBitmapFormat::YUV420SP_NV12;
+#else
+  const ImageBitmapFormat format = ImageBitmapFormat::BGRA32;
+#endif
   EncoderConfig config(
-      CodecType::H264,
+      aOptions.mH265 ? CodecType::H265 : CodecType::H264,
       gfx::IntSize(aOptions.mWidth, aOptions.mHeight), Usage::Realtime,
-      EncoderConfig::SampleFormat(ImageBitmapFormat::BGRA32),
+      EncoderConfig::SampleFormat(format),
       aOptions.mFramesPerSecond, aOptions.mFramesPerSecond,
       aOptions.mBitsPerSecond, 0, 0, BitrateMode::Variable,
       HardwarePreference::None, ScalabilityMode::None,
@@ -155,6 +181,7 @@ RefPtr<ElementVideoStream::CreatePromise> ElementVideoStream::Create(
   return stream->mEncoder->Configure(config)->Then(
       GetCurrentSerialEventTarget(), __func__,
       [stream](bool) {
+        stream->mPipelined = stream->mEncoder->SupportsPipelinedEncode();
         return CreatePromise::CreateAndResolve(stream, __func__);
       },
       [stream](const MediaResult& aError) {
@@ -167,36 +194,87 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::Encode(
     gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
     uint64_t aFrameIndex) {
   MOZ_ASSERT(!mShutdown);
+  RefPtr<EncodePromise::Private> promise =
+      MakeRefPtr<EncodePromise::Private>(__func__);
+  PendingEncode encode{std::move(aFragments), aFrameIndex, promise};
+  if (mPipelined) {
+    EncodeNow(std::move(encode));
+    return promise;
+  }
+  if (mEncoding) {
+    if (mPendingEncode) {
+      mPendingEncode->mPromise->Resolve(nsCString(), __func__);
+    }
+    mPendingEncode = MakeUnique<PendingEncode>(std::move(encode));
+  } else {
+    EncodeNow(std::move(encode));
+  }
+  return promise;
+}
+
+void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
+  MOZ_ASSERT(mPipelined || !mEncoding);
+  MOZ_ASSERT(!mShutdown);
+  mEncoding = !mPipelined;
   const gfx::IntSize size(mOptions.mWidth, mOptions.mHeight);
-  auto image = RenderFrame(std::move(aFragments), size
+#ifdef XP_MACOSX
+  RefPtr<MacIOSurface> frameSurface;
+  RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
+#endif
+  auto image = RenderFrame(std::move(aEncode.mFragments), size
 #ifdef XP_MACOSX
                            ,
-                           mIOSurface
+                           surface
 #endif
   );
   if (image.isErr()) {
-    return EncodePromise::CreateAndReject(image.unwrapErr(), __func__);
+    aEncode.mPromise->Reject(image.unwrapErr(), __func__);
+    if (!mPipelined) {
+      EncodeDone();
+    }
+    return;
   }
 
   const int64_t duration = USECS_PER_S / mOptions.mFramesPerSecond;
-  const int64_t timestamp = AssertedCast<int64_t>(aFrameIndex) * duration;
+  const int64_t timestamp =
+      AssertedCast<int64_t>(aEncode.mFrameIndex) * duration;
   const media::TimeUnit time = media::TimeUnit::FromMicroseconds(timestamp);
   RefPtr<VideoData> frame = VideoData::CreateFromImage(
       size, 0, time, media::TimeUnit::FromMicroseconds(duration),
-      image.unwrap(), aFrameIndex % mOptions.mFramesPerSecond == 0, time);
-  nsTArray<RefPtr<MediaData>> frames{frame};
-  return mEncoder->Encode(std::move(frames))->Then(
+      image.unwrap(),
+      aEncode.mFrameIndex % mOptions.mFramesPerSecond == 0, time);
+  RefPtr<MediaDataEncoder::EncodePromise> encode = mPipelined
+      ? mEncoder->EncodePipelined(frame)
+      : mEncoder->Encode(nsTArray<RefPtr<MediaData>>{frame});
+  encode->Then(
       GetCurrentSerialEventTarget(), __func__,
-      [size](MediaDataEncoder::EncodedData&& aFrames) {
+      [self = RefPtr{this}, size, promise = aEncode.mPromise](
+          MediaDataEncoder::EncodedData&& aFrames) {
         nsCString packet;
         for (const RefPtr<MediaRawData>& encoded : aFrames) {
           AppendEncodedFrame(packet, *encoded, size);
         }
-        return EncodePromise::CreateAndResolve(std::move(packet), __func__);
+        promise->Resolve(std::move(packet), __func__);
+        if (!self->mPipelined) {
+          self->EncodeDone();
+        }
       },
-      [](const MediaResult& aError) {
-        return EncodePromise::CreateAndReject(aError, __func__);
+      [self = RefPtr{this}, promise = aEncode.mPromise](
+          const MediaResult& aError) {
+        promise->Reject(aError, __func__);
+        if (!self->mPipelined) {
+          self->EncodeDone();
+        }
       });
+}
+
+void ElementVideoStream::EncodeDone() {
+  MOZ_ASSERT(mEncoding);
+  mEncoding = false;
+  if (!mShutdown && mPendingEncode) {
+    UniquePtr<PendingEncode> next = std::move(mPendingEncode);
+    EncodeNow(std::move(*next));
+  }
 }
 
 void ElementVideoStream::Shutdown() {
@@ -204,6 +282,11 @@ void ElementVideoStream::Shutdown() {
     return;
   }
   mShutdown = true;
+  if (mPendingEncode) {
+    mPendingEncode->mPromise->Reject(
+        StreamError("Element video stream stopped"_ns), __func__);
+    mPendingEncode = nullptr;
+  }
   (void)mEncoder->Shutdown();
 }
 

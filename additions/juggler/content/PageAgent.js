@@ -589,14 +589,14 @@ export class PageAgent {
     this._elementScreencastVideo = video;
   }
 
-  async _captureElementScreencastFrame({width, height, fps, bitrate, frameIndex}) {
+  async _captureElementScreencastFrame({width, height, fps, bitrate, codec, frameIndex}) {
     const node = this._elementScreencastNode;
     if (!node || !node.isConnected)
       throw new Error('Screencast element is detached from document');
     return {
       data: this._elementScreencastVideo
         ? await node.ownerGlobal.windowGlobalChild.encodeElementVideoFrame(
-            node, width, height, fps, bitrate, frameIndex)
+            node, width, height, fps, bitrate, codec, frameIndex)
         : await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
     };
   }

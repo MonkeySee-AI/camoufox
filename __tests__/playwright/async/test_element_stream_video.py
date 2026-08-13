@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.util
-import shutil
 from pathlib import Path
 
 import pytest
@@ -28,21 +27,10 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
     page: Page, playwright: Playwright
 ) -> None:
     # This crosses every runtime boundary in the POC: native selector paint,
-    # FFmpeg video encoding, chunked HTTP, MSE append, and browser video decode.
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        pytest.skip("system FFmpeg is not installed")
-    frame_source = CORE.LatestFrame()
-    fragments = VIDEO.FragmentStream()
+    # native encoding, chunked HTTP, WebCodecs, and browser canvas presentation.
+    packets = VIDEO.NativePacketStream()
     _, codec = VIDEO.h264_level(320, 180)
-    video = VIDEO.NativeVideoMuxer(
-        ffmpeg=ffmpeg,
-        frame_source=frame_source,
-        fragments=fragments,
-        fps=30,
-        codec=codec,
-    )
-    server = VIDEO.start_viewer_server("127.0.0.1", 0, fragments, video.codec)
+    server = VIDEO.start_viewer_server("127.0.0.1", 0, packets, codec)
     try:
         chrome = await playwright.chromium.launch(channel="chrome", headless=True)
     except Exception as error:
@@ -67,7 +55,7 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         )
 
         def on_frame(frame: dict[str, object]) -> None:
-            frame_source.update(CORE.normalize_frame_data(frame["data"]))
+            packets.update(CORE.normalize_frame_data(frame["data"]))
 
         await CORE.start_screencast(
             page,
@@ -82,24 +70,23 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         host, port = server.server_address[:2]
         await viewer.goto(f"http://{host}:{port}/")
         supported = await viewer.evaluate(
-            f"MediaSource.isTypeSupported('video/mp4; codecs=\"{video.codec}\"')"
+            f"VideoDecoder.isConfigSupported({{codec: '{codec}'}}).then(r => r.supported)"
         )
         if not supported:
-            pytest.skip(f"browser does not support {video.codec} through MSE")
+            pytest.skip(f"browser does not support {codec} through WebCodecs")
 
         # Decoded frames and the fixed dimensions prove actual video playback;
         # neither a mocked encoder nor a successfully loaded HTML shell can pass.
         await viewer.wait_for_function(
             """() => window.__decodedFrames >= 10 &&
-                     document.querySelector('video').videoWidth === 320 &&
-                     document.querySelector('video').videoHeight === 180""",
+                     window.__streamWidth === 320 &&
+                     window.__streamHeight === 180""",
             timeout=15_000,
         )
     finally:
         with contextlib.suppress(Exception):
             await page.screencast.stop()
-        frame_source.close()
-        video.close()
+        packets.close()
         server.shutdown()
         server.server_close()
         with contextlib.suppress(Exception):

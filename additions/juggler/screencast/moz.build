@@ -37,6 +37,8 @@ LOCAL_INCLUDES += [
 ]
 
 if CONFIG['OS_ARCH'] == 'Darwin':
+    SOURCES += ['ElementVideoStreamMac.mm']
+    OS_LIBS += ['-framework CoreImage']
     LOCAL_INCLUDES += [
         '/gfx/2d',
         '/gfx/layers',

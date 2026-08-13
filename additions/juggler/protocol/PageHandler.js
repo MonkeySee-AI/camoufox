@@ -904,7 +904,8 @@ export class PageHandler {
   }
 
   async _startElementScreencast({frameId, objectId, fps = 25, video = false,
-                                 width = 1280, height = 720, bitrate = 12000000}) {
+                                 width = 1280, height = 720, bitrate = 12000000,
+                                 codec = 'h264'}) {
     if (!frameId || !objectId)
       throw new Error('Element screencast requires frameId and objectId');
     if (this._elementScreencast)
@@ -915,6 +916,8 @@ export class PageHandler {
       throw new Error('Element video dimensions must be even and between 2 and 8192');
     if (video && (bitrate < 1000 || bitrate > 500000000))
       throw new Error('Element video bitrate must be between 1000 and 500000000');
+    if (video && codec !== 'h264' && codec !== 'h265')
+      throw new Error('Element video codec must be h264 or h265');
 
     await this._contentPage.send('startElementScreencast', {frameId, objectId, video});
     const state = {
@@ -927,7 +930,10 @@ export class PageHandler {
       height,
       fps,
       bitrate,
+      codec,
       frameIndex: 0,
+      capturesInFlight: 0,
+      nextFrameAt: Date.now(),
     };
     this._elementScreencast = state;
     void this._captureElementScreencastFrame(state);
@@ -935,20 +941,33 @@ export class PageHandler {
   }
 
   async _captureElementScreencastFrame(state) {
+    if (this._elementScreencast !== state)
+      return;
     const started = Date.now();
+    if (state.video) {
+      state.nextFrameAt += state.interval;
+      state.timer = setTimeout(() => void this._captureElementScreencastFrame(state),
+                               Math.max(0, state.nextFrameAt - Date.now()));
+      if (state.capturesInFlight >= 8)
+        return;
+      state.capturesInFlight++;
+    }
     try {
-      if (!state.waitingForAck) {
+      if (state.video || !state.waitingForAck) {
         const {data} = await this._contentPage.send('captureElementScreencastFrame', {
           width: state.width,
           height: state.height,
           fps: state.fps,
           bitrate: state.bitrate,
+          codec: state.codec,
           frameIndex: state.frameIndex++,
         });
         const size = state.video ? {width: state.width, height: state.height} : pngSize(data);
         if (this._elementScreencast !== state)
           return;
-        state.waitingForAck = true;
+        state.waitingForAck = !state.video;
+        if (!data)
+          return;
         this._session.emitEvent('Page.screencastFrame', {
           data,
           deviceWidth: size.width,
@@ -959,8 +978,11 @@ export class PageHandler {
     } catch (error) {
       if (this._elementScreencast !== state)
         return;
+    } finally {
+      if (state.video)
+        state.capturesInFlight--;
     }
-    if (this._elementScreencast === state)
+    if (!state.video && this._elementScreencast === state)
       state.timer = setTimeout(() => void this._captureElementScreencastFrame(state), Math.max(0, state.interval - (Date.now() - started)));
   }
 
