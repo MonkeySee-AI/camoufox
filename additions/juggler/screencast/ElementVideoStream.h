@@ -43,14 +43,23 @@ class ElementVideoStream final {
   RefPtr<EncodePromise> Encode(
       gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
       uint64_t aFrameIndex);
-  RefPtr<EncodePromise> EncodeSurface(
-      RefPtr<gfx::DataSourceSurface> aSurface, uint64_t aFrameIndex);
+  RefPtr<EncodePromise> EncodeSurface(RefPtr<gfx::DataSourceSurface> aSurface,
+                                      uint64_t aFrameIndex);
+#ifdef XP_MACOSX
+  RefPtr<EncodePromise> EncodeIOSurface(RefPtr<MacIOSurface> aSurface,
+                                        const gfx::IntRect& aSourceRect,
+                                        uint64_t aFrameIndex);
+#endif
   void Shutdown();
 
  private:
   struct PendingEncode {
     UniquePtr<gfx::CrossProcessPaint::ResolvedFragmentMap> mFragments;
     RefPtr<gfx::DataSourceSurface> mSurface;
+#ifdef XP_MACOSX
+    RefPtr<MacIOSurface> mIOSurface;
+    gfx::IntRect mSourceRect;
+#endif
     uint64_t mFrameIndex;
     RefPtr<EncodePromise::Private> mPromise;
   };

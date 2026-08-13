@@ -42,6 +42,7 @@ if CONFIG['OS_ARCH'] == 'Darwin':
     LOCAL_INCLUDES += [
         '/gfx/2d',
         '/gfx/layers',
+        '/widget/cocoa',
     ]
 
 LOCAL_INCLUDES += [

@@ -5,6 +5,12 @@
 #include "nsScreencastService.h"
 
 #include "ElementVideoStream.h"
+#ifdef XP_MACOSX
+#  include "ElementVideoStreamMac.h"
+#  include "mozilla/gfx/MacIOSurface.h"
+#  include "mozilla/layers/CompositorThread.h"
+#  include "mozilla/layers/NativeLayer.h"
+#endif
 #include "gfxContext.h"
 #include "gfxPlatform.h"
 #include "ScreencastEncoder.h"
@@ -161,6 +167,12 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
               return;
             }
             self->mNativeStream = std::move(aStream);
+#ifdef XP_MACOSX
+            if (!gfxPlatform::IsHeadless()) {
+              self->mNativeSnapshotter =
+                  dom::CreateWindowVideoSnapshotter(self->mWidget);
+            }
+#endif
             self->mNativeReady = true;
             MOZ_ALWAYS_SUCCEEDS(NS_NewTimerWithFuncCallback(
                 getter_AddRefs(self->mNativeTimer),
@@ -206,6 +218,17 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
       mNativeTimer->Cancel();
       mNativeTimer = nullptr;
     }
+#ifdef XP_MACOSX
+    if (mNativeSnapshotter) {
+      UniquePtr<layers::NativeLayerRootSnapshotter> snapshotter =
+          std::move(mNativeSnapshotter);
+      MOZ_ALWAYS_SUCCEEDS(
+          layers::CompositorThread()->Dispatch(NS_NewRunnableFunction(
+              __func__, [snapshotter = std::move(snapshotter)]() mutable {
+                snapshotter = nullptr;
+              })));
+    }
+#endif
     if (mCaptureModule) {
       if (mEncoder)
         mCaptureModule->DeRegisterCaptureDataCallback(this);
@@ -358,13 +381,70 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
         mFramesInFlight.load() >= kMaxNativeFramesInFlight)
       return;
 
+    const gfx::IntSize widgetSize = mWidget->GetClientSize().ToUnknownSize();
+    const uint32_t top = std::min(
+        mContentOffsetTop, static_cast<uint32_t>(widgetSize.height));
+    const int pageWidth = mViewportWidth
+                              ? std::min(mViewportWidth, widgetSize.width)
+                              : widgetSize.width;
+    const int availableHeight = widgetSize.height - top;
+    const int pageHeight = mViewportHeight
+                               ? std::min(mViewportHeight, availableHeight)
+                               : availableHeight;
+    if (widgetSize.IsEmpty() || pageWidth <= 1 || pageHeight <= 1)
+      return;
+
+#ifdef XP_MACOSX
+    if (mNativeSnapshotter) {
+      gfx::IntSize captureSize = widgetSize;
+      gfx::IntPoint sourceOrigin(0, top);
+      if (nsIWidget* topLevel = mWidget->GetTopLevelWidget()) {
+        captureSize = topLevel->GetClientSize().ToUnknownSize();
+        if (topLevel != mWidget) {
+          const gfx::IntRect rootBounds =
+              topLevel->GetScreenBounds().ToUnknownRect();
+          const gfx::IntRect widgetBounds =
+              mWidget->GetScreenBounds().ToUnknownRect();
+          sourceOrigin = widgetBounds.TopLeft() - rootBounds.TopLeft();
+        }
+      }
+      mFramesInFlight.fetch_add(1);
+      const uint64_t frameIndex = mFrameIndex.fetch_add(1);
+      const double timestamp = ScreencastTimestampSeconds();
+      const gfx::IntRect sourceRect(sourceOrigin,
+                                    gfx::IntSize(pageWidth, pageHeight));
+      layers::NativeLayerRootSnapshotter* snapshotter =
+          mNativeSnapshotter.get();
+      RefPtr<Session> self{this};
+      MOZ_ALWAYS_SUCCEEDS(
+          layers::CompositorThread()->Dispatch(NS_NewRunnableFunction(
+              __func__, [self, snapshotter, captureSize, sourceRect, pageWidth,
+                         pageHeight, frameIndex, timestamp] {
+                RefPtr<MacIOSurface> surface =
+                    snapshotter->GetWindowIOSurface(captureSize);
+                NS_DispatchToMainThread(NS_NewRunnableFunction(
+                    "EncodeNativeViewportFrame",
+                    [self, surface = std::move(surface), sourceRect, pageWidth,
+                     pageHeight, frameIndex, timestamp] {
+                      if (self->mStopped || !self->mNativeStream || !surface) {
+                        self->mFramesInFlight.fetch_sub(1);
+                        return;
+                      }
+                      self->SubmitNativeFrame(
+                          self->mNativeStream->EncodeIOSurface(
+                              std::move(surface), sourceRect, frameIndex),
+                          pageWidth, pageHeight, timestamp);
+                    }));
+              })));
+      return;
+    }
+#endif
+
     WindowRenderer* renderer = mWidget->GetWindowRenderer();
     layers::WebRenderLayerManager* layerManager =
         renderer ? renderer->AsWebRender() : nullptr;
-    const gfx::IntSize widgetSize = mWidget->GetClientSize().ToUnknownSize();
-    if (!layerManager || widgetSize.IsEmpty())
+    if (!layerManager)
       return;
-
     RefPtr<gfx::DrawTarget> target =
         gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
             widgetSize, gfx::SurfaceFormat::B8G8R8A8);
@@ -378,16 +458,7 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     RefPtr<gfx::SourceSurface> snapshot = target->Snapshot();
     RefPtr<gfx::DataSourceSurface> source =
         snapshot ? snapshot->GetDataSurface() : nullptr;
-    const uint32_t top = std::min(
-        mContentOffsetTop, static_cast<uint32_t>(widgetSize.height));
-    const int pageWidth = mViewportWidth
-                              ? std::min(mViewportWidth, widgetSize.width)
-                              : widgetSize.width;
-    const int availableHeight = widgetSize.height - top;
-    const int pageHeight = mViewportHeight
-                               ? std::min(mViewportHeight, availableHeight)
-                               : availableHeight;
-    if (!source || pageWidth <= 1 || pageHeight <= 1)
+    if (!source)
       return;
 
     RefPtr<gfx::DataSourceSurface> surface =
@@ -413,24 +484,30 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     mFramesInFlight.fetch_add(1);
     const uint64_t frameIndex = mFrameIndex.fetch_add(1);
     const double timestamp = ScreencastTimestampSeconds();
-    mNativeStream->EncodeSurface(std::move(surface), frameIndex)
-        ->Then(
-            GetCurrentSerialEventTarget(), __func__,
-            [self = RefPtr{this}, pageWidth, pageHeight, timestamp](
-                nsCString&& aPacket) {
-              self->mFramesInFlight.fetch_sub(1);
-              if (self->mStopped || aPacket.IsEmpty())
-                return;
-              nsCString base64;
-              if (NS_FAILED(Base64Encode(aPacket, base64)))
-                return;
-              NS_ConvertUTF8toUTF16 utf16(base64);
-              self->mClient->ScreencastFrame(utf16, pageWidth, pageHeight,
-                                             timestamp);
-            },
-            [self = RefPtr{this}](const MediaResult&) {
-              self->mFramesInFlight.fetch_sub(1);
-            });
+    SubmitNativeFrame(
+        mNativeStream->EncodeSurface(std::move(surface), frameIndex), pageWidth,
+        pageHeight, timestamp);
+  }
+
+  void SubmitNativeFrame(RefPtr<dom::ElementVideoStream::EncodePromise> aEncode,
+                         int aPageWidth, int aPageHeight, double aTimestamp) {
+    aEncode->Then(
+        GetCurrentSerialEventTarget(), __func__,
+        [self = RefPtr{this}, aPageWidth, aPageHeight,
+         aTimestamp](nsCString&& aPacket) {
+          self->mFramesInFlight.fetch_sub(1);
+          if (self->mStopped || aPacket.IsEmpty())
+            return;
+          nsCString base64;
+          if (NS_FAILED(Base64Encode(aPacket, base64)))
+            return;
+          NS_ConvertUTF8toUTF16 utf16(base64);
+          self->mClient->ScreencastFrame(utf16, aPageWidth, aPageHeight,
+                                         aTimestamp);
+        },
+        [self = RefPtr{this}](const MediaResult&) {
+          self->mFramesInFlight.fetch_sub(1);
+        });
   }
 
  private:
@@ -455,6 +532,9 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
   std::atomic<uint64_t> mFrameIndex = 0;
   nsCOMPtr<nsITimer> mNativeTimer;
   RefPtr<dom::ElementVideoStream> mNativeStream;
+#ifdef XP_MACOSX
+  UniquePtr<layers::NativeLayerRootSnapshotter> mNativeSnapshotter;
+#endif
 };
 
 

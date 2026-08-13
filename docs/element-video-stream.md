@@ -10,7 +10,7 @@ frame on a fixed canvas; PNG, Python image work, FFmpeg, and MSE are absent.
 
 | Platform | Working path | 4K60 target |
 | --- | --- | --- |
-| macOS | Tight BGRA compositor/element surface → NV12 `IOSurface` → VideoToolbox HEVC | Implemented and measured at 4K60 headless |
+| macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Implemented and measured at 4K60 headed and headless |
 | Windows | CPU `SourceSurfaceImage` into Media Foundation H.264 | D3D11 texture wrapped with `MFCreateDXGISurfaceBuffer` |
 | Linux | CPU `SourceSurfaceImage` into an available Gecko H.264 encoder | DMA-BUF imported by VAAPI/NVENC in RDD/GPU |
 
@@ -28,12 +28,11 @@ browser crop is copied into the encoder path.
 
 On Apple Silicon the macOS path uses eight bounded frames in flight, per-frame
 VideoToolbox completions, synchronized Core Image RGB→NV12 compositing, and HEVC
-for 4K. A 15-second headless measurement of the full 1280×720 browser viewport
-scaled to 3840×2160 sustained 59.24 native frames/s and 59.25 decoded and
-presented frames/s in real Chrome with no decoder errors. The current headed
-Retina WebRender readback measured 22.06 frames/s; eliminating that CPU
-readback with a compositor-surface handoff remains the next headed-path
-optimization.
+for 4K. Headed capture renders the already-composited Core Animation layer tree
+directly into an IOSurface on the compositor thread, avoiding the synchronous
+CPU WebRender readback. A 15-second headed measurement of the full 1280×720
+browser viewport scaled to 3840×2160 sustained 59.52 native and decoded
+frames/s and 59.78 presented frames/s in real Chrome with no decoder errors.
 
 The binary callback may contain multiple frames. `RSE2` carries the centered
 content rectangle for that exact encoded frame, letting clients keep a fixed

@@ -7,6 +7,9 @@ IDL = ROOT / "additions/juggler/screencast/nsIScreencastService.idl"
 HANDLER = ROOT / "additions/juggler/protocol/PageHandler.js"
 REGISTRY = ROOT / "additions/juggler/TargetRegistry.js"
 SNAPSHOT_PATCH = ROOT / "patches/webrender-snapshot-stride.patch"
+IOSURFACE_PATCH = ROOT / "patches/native-viewport-iosurface.patch"
+
+
 def test_native_viewport_stream_reuses_webrender_snapshot() -> None:
     # This compatibility sentinel keeps native viewport video on Gecko's
     # compositor readback and shared encoder instead of OS window capture.
@@ -20,6 +23,20 @@ def test_native_viewport_stream_reuses_webrender_snapshot() -> None:
     assert "EncodeSurface" in source
     assert "kMaxNativeFramesInFlight = 8" in source
     assert "TYPE_REPEATING_PRECISE_CAN_SKIP" in source
+
+
+def test_headed_macos_viewport_uses_compositor_iosurface() -> None:
+    # Headed macOS must route the native layer tree through a GPU IOSurface;
+    # the browser integration owns the pixel and cross-process guarantees.
+    service = SERVICE.read_text()
+    patch = IOSURFACE_PATCH.read_text()
+
+    assert "CreateWindowVideoSnapshotter" in service
+    assert "GetWindowIOSurface(captureSize)" in service
+    assert "EncodeIOSurface" in service
+    assert "CompositorThread()->Dispatch" in service
+    assert "SharedSurface_IOSurface::Create" in patch
+    assert "RenderSnapshot(aWindowSize, mIOSurfaceSnapshot->mFb->mFB" in patch
 
 
 def test_webrender_readback_keeps_buffer_stride() -> None:

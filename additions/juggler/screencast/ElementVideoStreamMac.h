@@ -6,15 +6,25 @@
 #define mozilla_dom_ElementVideoStreamMac_h
 
 #include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Rect.h"
 
 class MacIOSurface;
+class nsIWidget;
+
+namespace mozilla::layers {
+class NativeLayerRootSnapshotter;
+}
 
 namespace mozilla::dom {
 
+UniquePtr<layers::NativeLayerRootSnapshotter> CreateWindowVideoSnapshotter(
+    nsIWidget* aWidget);
 bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
                                   const RefPtr<MacIOSurface>& aDestination,
-                                  const gfx::IntRect& aDestinationRect);
+                                  const gfx::IntRect& aSourceRect,
+                                  const gfx::IntRect& aDestinationRect,
+                                  bool aSourceIsFlipped = false);
 
 }  // namespace mozilla::dom
 

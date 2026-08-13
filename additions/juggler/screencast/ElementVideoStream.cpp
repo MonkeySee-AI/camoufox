@@ -154,7 +154,9 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   if (!aIOSurface) {
     return Err(StreamError("Could not allocate the output IOSurface"_ns));
   }
-  if (!CompositeElementVideoSurface(staging, aIOSurface, aContentRect)) {
+  if (!CompositeElementVideoSurface(
+          staging, aIOSurface,
+          gfx::IntRect(gfx::IntPoint(), staging->GetSize()), aContentRect)) {
     return Err(StreamError("Could not composite the IOSurface video frame"_ns));
   }
   return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
@@ -206,7 +208,9 @@ Result<RefPtr<layers::Image>, MediaResult> RenderSurface(
         gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8);
   }
   if (!aIOSurface ||
-      !CompositeElementVideoSurface(staging, aIOSurface, aContentRect)) {
+      !CompositeElementVideoSurface(
+          staging, aIOSurface,
+          gfx::IntRect(gfx::IntPoint(), staging->GetSize()), aContentRect)) {
     return Err(StreamError("Could not composite the viewport IOSurface"_ns));
   }
   return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
@@ -227,6 +231,35 @@ Result<RefPtr<layers::Image>, MediaResult> RenderSurface(
   return RefPtr<layers::Image>(new layers::SourceSurfaceImage(output));
 #endif
 }
+
+#ifdef XP_MACOSX
+Result<RefPtr<layers::Image>, MediaResult> RenderIOSurface(
+    const RefPtr<MacIOSurface>& aSource, const gfx::IntRect& aSourceRect,
+    const gfx::IntSize& aOutputSize, gfx::IntRect& aContentRect,
+    RefPtr<MacIOSurface>& aIOSurface) {
+  if (!aSource || aSourceRect.IsEmpty() ||
+      !gfx::IntRect(gfx::IntPoint(), aSource->GetSize())
+           .Contains(aSourceRect)) {
+    return Err(
+        StreamError("Viewport capture produced an invalid IOSurface"_ns));
+  }
+  aContentRect = gfx::IntRect(gfx::IntPoint(), aOutputSize);
+  if (!aIOSurface || aIOSurface->GetSize() != aOutputSize) {
+    aIOSurface = MacIOSurface::CreateBiPlanarSurface(
+        aOutputSize,
+        gfx::IntSize(aOutputSize.width / 2, aOutputSize.height / 2),
+        gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT,
+        gfx::YUVColorSpace::BT709, gfx::TransferFunction::BT709,
+        gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8);
+  }
+  if (!aIOSurface ||
+      !CompositeElementVideoSurface(aSource, aIOSurface, aSourceRect,
+                                    aContentRect, true)) {
+    return Err(StreamError("Could not composite the viewport IOSurface"_ns));
+  }
+  return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
+}
+#endif
 
 }  // namespace
 
@@ -282,10 +315,11 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::Encode(
   MOZ_ASSERT(!mShutdown);
   RefPtr<EncodePromise::Private> promise =
       MakeRefPtr<EncodePromise::Private>(__func__);
-  PendingEncode encode{
-      MakeUnique<gfx::CrossProcessPaint::ResolvedFragmentMap>(
-          std::move(aFragments)),
-      nullptr, aFrameIndex, promise};
+  PendingEncode encode;
+  encode.mFragments = MakeUnique<gfx::CrossProcessPaint::ResolvedFragmentMap>(
+      std::move(aFragments));
+  encode.mFrameIndex = aFrameIndex;
+  encode.mPromise = promise;
   if (mPipelined) {
     EncodeNow(std::move(encode));
     return promise;
@@ -306,7 +340,10 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeSurface(
   MOZ_ASSERT(!mShutdown);
   RefPtr<EncodePromise::Private> promise =
       MakeRefPtr<EncodePromise::Private>(__func__);
-  PendingEncode encode{nullptr, std::move(aSurface), aFrameIndex, promise};
+  PendingEncode encode;
+  encode.mSurface = std::move(aSurface);
+  encode.mFrameIndex = aFrameIndex;
+  encode.mPromise = promise;
   if (mPipelined) {
     EncodeNow(std::move(encode));
     return promise;
@@ -322,6 +359,34 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeSurface(
   return promise;
 }
 
+#ifdef XP_MACOSX
+RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeIOSurface(
+    RefPtr<MacIOSurface> aSurface, const gfx::IntRect& aSourceRect,
+    uint64_t aFrameIndex) {
+  MOZ_ASSERT(!mShutdown);
+  RefPtr<EncodePromise::Private> promise =
+      MakeRefPtr<EncodePromise::Private>(__func__);
+  PendingEncode encode;
+  encode.mIOSurface = std::move(aSurface);
+  encode.mSourceRect = aSourceRect;
+  encode.mFrameIndex = aFrameIndex;
+  encode.mPromise = promise;
+  if (mPipelined) {
+    EncodeNow(std::move(encode));
+    return promise;
+  }
+  if (mEncoding) {
+    if (mPendingEncode) {
+      mPendingEncode->mPromise->Resolve(nsCString(), __func__);
+    }
+    mPendingEncode = MakeUnique<PendingEncode>(std::move(encode));
+  } else {
+    EncodeNow(std::move(encode));
+  }
+  return promise;
+}
+#endif
+
 void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   MOZ_ASSERT(mPipelined || !mEncoding);
   MOZ_ASSERT(!mShutdown);
@@ -332,7 +397,14 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   RefPtr<MacIOSurface> frameSurface;
   RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
 #endif
-  Result<RefPtr<layers::Image>, MediaResult> image = aEncode.mSurface
+  Result<RefPtr<layers::Image>, MediaResult> image =
+#ifdef XP_MACOSX
+      aEncode.mIOSurface
+          ? RenderIOSurface(aEncode.mIOSurface, aEncode.mSourceRect, size,
+                            contentRect, surface)
+      :
+#endif
+      aEncode.mSurface
       ? RenderSurface(aEncode.mSurface.get(), size, contentRect
 #ifdef XP_MACOSX
                       , surface

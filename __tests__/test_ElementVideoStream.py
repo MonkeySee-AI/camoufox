@@ -22,10 +22,13 @@ def test_shared_stream_keeps_platform_encoders_behind_gecko_contract() -> None:
     assert "EncodeSurface" in source
     assert "CreateBiPlanarSurface" in source
     assert "YUV420SP_NV12" in source
+    assert "RenderIOSurface" in source
+    assert "EncodeIOSurface" in source
     assert "startTaskToRender" in STREAM_MAC.read_text()
     assert "waitUntilCompletedAndReturnError" in STREAM_MAC.read_text()
     assert "imageByCompositingOverImage" in STREAM_MAC.read_text()
-    assert "aDestinationRect.width / sourceSize.width" in STREAM_MAC.read_text()
+    assert "aDestinationRect.width / aSourceRect.width" in STREAM_MAC.read_text()
+    assert "sourceSize.height - aSourceRect.YMost()" in STREAM_MAC.read_text()
 
 
 def test_build_contract_includes_shared_media_encoder_headers() -> None:
