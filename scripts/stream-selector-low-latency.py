@@ -99,7 +99,7 @@ def viewer_html(codec: str) -> bytes:
     return f"""<!doctype html>
 <meta charset=utf-8><title>Rotunda low-latency selector stream</title>
 <style>
-html,body{{margin:0;height:100%;background:#080b12;color:white;font:14px system-ui}}
+html,body{{margin:0;height:100%;background:white;color:#111;font:14px system-ui}}
 body{{display:grid;place-items:center;overflow:hidden}}
 #popover{{position:relative;display:grid;place-items:center;width:fit-content;height:fit-content}}
 #popover::before{{

@@ -20,7 +20,7 @@ host and client share one hardware codec.
 
 Frames use a fixed even-sized canvas so a resizing element does not recreate
 the encoder. The element recording is scaled uniformly, centered, and painted
-over opaque black. It is never enlarged to fill that canvas; macOS rasterizes
+over opaque white. It is never enlarged to fill that canvas; macOS rasterizes
 at up to Retina density and Core Image composites it without resampling.
 
 On Apple Silicon the macOS path uses eight bounded captures in flight,

@@ -117,7 +117,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
 
   outputTarget->FillRect(
       gfx::Rect(gfx::Point(), gfx::Size(renderSize)),
-      gfx::ColorPattern(gfx::DeviceColor(0, 0, 0, 1)));
+      gfx::ColorPattern(gfx::DeviceColor(1, 1, 1, 1)));
 #ifdef XP_MACOSX
   const gfx::Point offset(0, 0);
 #else
