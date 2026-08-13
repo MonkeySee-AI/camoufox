@@ -101,7 +101,14 @@ def viewer_html(codec: str) -> bytes:
 <style>
 html,body{{margin:0;height:100%;background:#080b12;color:white;font:14px system-ui}}
 body{{display:grid;place-items:center;overflow:hidden}}
-#popover{{display:grid;place-items:center;width:fit-content;height:fit-content}}
+#popover{{position:relative;display:grid;place-items:center;width:fit-content;height:fit-content}}
+#popover::before{{
+  content:"";position:absolute;inset:-8px;padding:6px;pointer-events:none;
+  border-radius:30px;background:conic-gradient(#ff3d81,#ffcc00,#00e5a8,#21a8ff,#9b5cff,#ff3d81);
+  filter:drop-shadow(0 0 12px #8b5cf6aa);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;
+}}
 canvas{{display:block;max-width:none;max-height:none}}
 #stats{{position:fixed;top:12px;left:12px;padding:7px 10px;border-radius:7px;background:#000a}}
 </style>
