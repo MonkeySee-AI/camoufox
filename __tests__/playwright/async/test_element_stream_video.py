@@ -232,7 +232,7 @@ async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
         screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
 
         # Parent blue and remote-frame green must both survive the native
-        # cross-process paint; the offscreen yellow block must not appear.
+        # compositor snapshot; the offscreen yellow block must not appear.
         blue = screenshot.getpixel((500, 300))
         green = screenshot.getpixel((240, 160))
         assert blue[2] > 120 and blue[0] < 70 and blue[1] < 80, blue

@@ -1,0 +1,24 @@
+diff --git a/gfx/layers/wr/WebRenderBridgeParent.cpp b/gfx/layers/wr/WebRenderBridgeParent.cpp
+index bcf796c0d4..12325ff6a0 100644
+--- a/gfx/layers/wr/WebRenderBridgeParent.cpp
++++ b/gfx/layers/wr/WebRenderBridgeParent.cpp
+@@ -2027,5 +2027,18 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvGetSnapshot(
+                             Range<uint8_t>(buffer, buffer_size.value()),
+                             aNeedsYFlip);
+-
++  const Maybe<int32_t> stride = ImageDataSerializer::ComputeRGBStride(
++      bufferTexture->GetFormat(), size.width);
++  const size_t packedStride = static_cast<size_t>(size.width) * 4;
++  if (!stride || static_cast<size_t>(*stride) * size.height >
++                     bufferTexture->GetBufferSize()) {
++    return IPC_FAIL_NO_REASON(this);
++  }
++  // Readback produces tightly packed pixels, but BufferTexture may align rows.
++  // Expand bottom-up in place so consumers observe the descriptor's stride.
++  for (int32_t row = size.height - 1; row > 0; --row) {
++    memmove(buffer + static_cast<size_t>(row) * *stride,
++            buffer + static_cast<size_t>(row) * packedStride, packedStride);
++  }
++
+   return IPC_OK();
+ }

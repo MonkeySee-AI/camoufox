@@ -882,7 +882,7 @@ export class PageHandler {
   }
 
   async ['Page.startScreencast'](options) {
-    if (options.objectId || options.frameId || options.video)
+    if (options.objectId || options.frameId)
       return await this._startElementScreencast(options);
     return await this._pageTarget.startScreencast(options);
   }
@@ -906,10 +906,8 @@ export class PageHandler {
   async _startElementScreencast({frameId, objectId, fps = 25, video = false,
                                  width = 1280, height = 720, bitrate = 12000000,
                                  codec = 'h264'}) {
-    if (!!frameId !== !!objectId)
-      throw new Error('Element screencast requires both frameId and objectId');
-    if (!frameId && !video)
-      throw new Error('Viewport native screencast requires video mode');
+    if (!frameId || !objectId)
+      throw new Error('Element screencast requires frameId and objectId');
     if (this._elementScreencast)
       throw new Error('Screencast is already running');
     if (fps < 1 || fps > 60)

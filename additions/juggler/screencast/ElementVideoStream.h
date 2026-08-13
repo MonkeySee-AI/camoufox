@@ -9,6 +9,7 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 
 class MacIOSurface;
@@ -29,8 +30,6 @@ class ElementVideoStream final {
     uint32_t mFramesPerSecond;
     uint32_t mBitsPerSecond;
     bool mH265;
-    bool mFillOutput;
-
     bool operator==(const Options& aOther) const = default;
   };
 
@@ -44,11 +43,14 @@ class ElementVideoStream final {
   RefPtr<EncodePromise> Encode(
       gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
       uint64_t aFrameIndex);
+  RefPtr<EncodePromise> EncodeSurface(
+      RefPtr<gfx::DataSourceSurface> aSurface, uint64_t aFrameIndex);
   void Shutdown();
 
  private:
   struct PendingEncode {
-    gfx::CrossProcessPaint::ResolvedFragmentMap mFragments;
+    UniquePtr<gfx::CrossProcessPaint::ResolvedFragmentMap> mFragments;
+    RefPtr<gfx::DataSourceSurface> mSurface;
     uint64_t mFrameIndex;
     RefPtr<EncodePromise::Private> mPromise;
   };

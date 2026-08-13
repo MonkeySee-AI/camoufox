@@ -64,8 +64,7 @@ void AppendEncodedFrame(nsCString& aPacket, const MediaRawData& aFrame,
 
 Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
-    const gfx::IntSize& aOutputSize, bool aFillOutput,
-    gfx::IntRect& aContentRect
+    const gfx::IntSize& aOutputSize, gfx::IntRect& aContentRect
 #ifdef XP_MACOSX
     ,
     RefPtr<MacIOSurface>& aIOSurface
@@ -76,21 +75,15 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     return Err(StreamError("Element paint did not produce a root surface"_ns));
   }
 
-  double scale;
-  if (aFillOutput) {
-    scale = std::min(static_cast<double>(aOutputSize.width) / root->mSize.width,
-                     static_cast<double>(aOutputSize.height) / root->mSize.height);
-  } else {
-    const double canvasScale = std::min(
-        {1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
-    const gfx::IntSize logicalSize(
-        std::max(2, static_cast<int32_t>(aOutputSize.width * canvasScale)),
-        std::max(2, static_cast<int32_t>(aOutputSize.height * canvasScale)));
-    const double fitScale = std::min(
-        {1.0, static_cast<double>(logicalSize.width) / root->mSize.width,
-         static_cast<double>(logicalSize.height) / root->mSize.height});
-    scale = fitScale * std::min(2.0, 1.0 / canvasScale);
-  }
+  const double canvasScale = std::min(
+      {1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
+  const gfx::IntSize logicalSize(
+      std::max(2, static_cast<int32_t>(aOutputSize.width * canvasScale)),
+      std::max(2, static_cast<int32_t>(aOutputSize.height * canvasScale)));
+  const double fitScale = std::min(
+      {1.0, static_cast<double>(logicalSize.width) / root->mSize.width,
+       static_cast<double>(logicalSize.height) / root->mSize.height});
+  const double scale = fitScale * std::min(2.0, 1.0 / canvasScale);
   const gfx::Size fitted(root->mSize.width * scale,
                          root->mSize.height * scale);
   const gfx::IntSize contentSize(
@@ -104,7 +97,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
 
   RefPtr<gfx::DrawTarget> outputTarget;
 #ifdef XP_MACOSX
-  const gfx::IntSize renderSize = aFillOutput ? root->mSize : contentSize;
+  const gfx::IntSize renderSize = contentSize;
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
       renderSize.width, renderSize.height, false);
   if (!staging || !staging->Lock(false)) {
@@ -128,7 +121,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
       gfx::ColorPattern(gfx::DeviceColor(1, 1, 1, 1)));
 #ifdef XP_MACOSX
   const gfx::Point offset(0, 0);
-  const double paintScale = aFillOutput ? 1.0 : scale;
+  const double paintScale = scale;
 #else
   const gfx::Point offset((renderSize.width - fitted.width) / 2,
                           (renderSize.height - fitted.height) / 2);
@@ -169,6 +162,67 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   RefPtr<gfx::SourceSurface> output = outputTarget->Snapshot();
   if (!output) {
     return Err(StreamError("Could not snapshot the video frame"_ns));
+  }
+  return RefPtr<layers::Image>(new layers::SourceSurfaceImage(output));
+#endif
+}
+
+Result<RefPtr<layers::Image>, MediaResult> RenderSurface(
+    gfx::DataSourceSurface* aSource, const gfx::IntSize& aOutputSize,
+    gfx::IntRect& aContentRect
+#ifdef XP_MACOSX
+    ,
+    RefPtr<MacIOSurface>& aIOSurface
+#endif
+) {
+  if (!aSource || aSource->GetSize().IsEmpty()) {
+    return Err(StreamError("Viewport capture did not produce a surface"_ns));
+  }
+  aContentRect = gfx::IntRect(gfx::IntPoint(), aOutputSize);
+#ifdef XP_MACOSX
+  const gfx::IntSize sourceSize = aSource->GetSize();
+  RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
+      sourceSize.width, sourceSize.height, false);
+  if (!staging || !staging->Lock(false)) {
+    return Err(StreamError("Could not lock a viewport IOSurface"_ns));
+  }
+  auto unlock = MakeScopeExit([&] { staging->Unlock(false); });
+  RefPtr<gfx::DrawTarget> target =
+      staging->GetAsDrawTargetLocked(gfx::BackendType::SKIA);
+  if (!target || !target->IsValid()) {
+    return Err(StreamError("Could not allocate a viewport surface"_ns));
+  }
+  target->DrawSurface(aSource, gfx::Rect(gfx::Point(), gfx::Size(sourceSize)),
+                      gfx::Rect(gfx::Point(), gfx::Size(sourceSize)));
+  target->Flush();
+  unlock.release();
+  staging->Unlock(false);
+  if (!aIOSurface || aIOSurface->GetSize() != aOutputSize) {
+    aIOSurface = MacIOSurface::CreateBiPlanarSurface(
+        aOutputSize,
+        gfx::IntSize(aOutputSize.width / 2, aOutputSize.height / 2),
+        gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT,
+        gfx::YUVColorSpace::BT709, gfx::TransferFunction::BT709,
+        gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8);
+  }
+  if (!aIOSurface ||
+      !CompositeElementVideoSurface(staging, aIOSurface, aContentRect)) {
+    return Err(StreamError("Could not composite the viewport IOSurface"_ns));
+  }
+  return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
+#else
+  RefPtr<gfx::DrawTarget> target =
+      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
+          aOutputSize, gfx::SurfaceFormat::B8G8R8X8);
+  if (!target || !target->IsValid()) {
+    return Err(StreamError("Could not allocate a viewport video frame"_ns));
+  }
+  target->DrawSurface(aSource,
+                      gfx::Rect(gfx::Point(), gfx::Size(aOutputSize)),
+                      gfx::Rect(gfx::Point(), gfx::Size(aSource->GetSize())));
+  RefPtr<gfx::SourceSurface> output = target->Snapshot();
+  if (!output) {
+    return Err(StreamError("Could not snapshot the viewport video frame"_ns));
   }
   return RefPtr<layers::Image>(new layers::SourceSurfaceImage(output));
 #endif
@@ -228,7 +282,31 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::Encode(
   MOZ_ASSERT(!mShutdown);
   RefPtr<EncodePromise::Private> promise =
       MakeRefPtr<EncodePromise::Private>(__func__);
-  PendingEncode encode{std::move(aFragments), aFrameIndex, promise};
+  PendingEncode encode{
+      MakeUnique<gfx::CrossProcessPaint::ResolvedFragmentMap>(
+          std::move(aFragments)),
+      nullptr, aFrameIndex, promise};
+  if (mPipelined) {
+    EncodeNow(std::move(encode));
+    return promise;
+  }
+  if (mEncoding) {
+    if (mPendingEncode) {
+      mPendingEncode->mPromise->Resolve(nsCString(), __func__);
+    }
+    mPendingEncode = MakeUnique<PendingEncode>(std::move(encode));
+  } else {
+    EncodeNow(std::move(encode));
+  }
+  return promise;
+}
+
+RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeSurface(
+    RefPtr<gfx::DataSourceSurface> aSurface, uint64_t aFrameIndex) {
+  MOZ_ASSERT(!mShutdown);
+  RefPtr<EncodePromise::Private> promise =
+      MakeRefPtr<EncodePromise::Private>(__func__);
+  PendingEncode encode{nullptr, std::move(aSurface), aFrameIndex, promise};
   if (mPipelined) {
     EncodeNow(std::move(encode));
     return promise;
@@ -254,13 +332,17 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   RefPtr<MacIOSurface> frameSurface;
   RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
 #endif
-  auto image = RenderFrame(std::move(aEncode.mFragments), size,
-                           mOptions.mFillOutput, contentRect
+  Result<RefPtr<layers::Image>, MediaResult> image = aEncode.mSurface
+      ? RenderSurface(aEncode.mSurface.get(), size, contentRect
 #ifdef XP_MACOSX
-                           ,
-                           surface
+                      , surface
 #endif
-  );
+        )
+      : RenderFrame(std::move(*aEncode.mFragments), size, contentRect
+#ifdef XP_MACOSX
+                    , surface
+#endif
+        );
   if (image.isErr()) {
     aEncode.mPromise->Reject(image.unwrapErr(), __func__);
     if (!mPipelined) {

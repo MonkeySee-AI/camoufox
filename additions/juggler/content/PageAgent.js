@@ -164,7 +164,6 @@ export class PageAgent {
 
     this._workerData = new Map();
     this._elementScreencastNode = null;
-    this._elementScreencastViewport = false;
 
     const docShell = frameTree.mainFrame().docShell();
     this._docShell = docShell;
@@ -451,7 +450,6 @@ export class PageAgent {
 
   dispose() {
     this._elementScreencastNode = null;
-    this._elementScreencastViewport = false;
     for (const workerData of this._workerData.values())
       workerData.dispose();
     this._workerData.clear();
@@ -578,20 +576,16 @@ export class PageAgent {
   }
 
   _startElementScreencast({objectId, frameId, video = false}) {
-    const viewport = !frameId && !objectId;
-    const frame = viewport ? this._frameTree.mainFrame() : this._frameTree.frame(frameId);
+    const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
-    const unsafeObject = viewport ? frame.domWindow().document.documentElement : frame.unsafeObject(objectId);
+    const unsafeObject = frame.unsafeObject(objectId);
     if (!unsafeObject)
-      throw new Error('Failed to find screencast target');
+      throw new Error('Failed to find screencast element');
     this._elementScreencastNode = unsafeObject;
-    this._elementScreencastViewport = viewport;
-    if (!viewport) {
-      const box = this._getNodeBoundingBox(unsafeObject);
-      if (!box || box.width <= 0 || box.height <= 0)
-        throw new Error('Screencast element has no visible layout box');
-    }
+    const box = this._getNodeBoundingBox(unsafeObject);
+    if (!box || box.width <= 0 || box.height <= 0)
+      throw new Error('Screencast element has no visible layout box');
     this._elementScreencastVideo = video;
   }
 
@@ -602,8 +596,7 @@ export class PageAgent {
     return {
       data: this._elementScreencastVideo
         ? await node.ownerGlobal.windowGlobalChild.encodeElementVideoFrame(
-            this._elementScreencastViewport ? null : node,
-            width, height, fps, bitrate, codec, frameIndex)
+            node, width, height, fps, bitrate, codec, frameIndex)
         : await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
     };
   }
@@ -612,7 +605,6 @@ export class PageAgent {
     if (this._elementScreencastVideo && this._elementScreencastNode)
       await this._elementScreencastNode.ownerGlobal.windowGlobalChild.stopElementVideoStream();
     this._elementScreencastNode = null;
-    this._elementScreencastViewport = false;
     this._elementScreencastVideo = false;
   }
 

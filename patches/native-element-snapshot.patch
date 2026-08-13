@@ -1,5 +1,5 @@
 diff --git a/dom/chrome-webidl/WindowGlobalActors.webidl b/dom/chrome-webidl/WindowGlobalActors.webidl
-index a1f031ffe2..4199bc357d 100644
+index a1f031ffe2..f3127df373 100644
 --- a/dom/chrome-webidl/WindowGlobalActors.webidl
 +++ b/dom/chrome-webidl/WindowGlobalActors.webidl
 @@ -217,4 +217,21 @@ interface WindowGlobalChild {
@@ -14,7 +14,7 @@ index a1f031ffe2..4199bc357d 100644
 +
 +  /** Paint an element subtree and encode it into a persistent native stream. */
 +  [NewObject]
-+  Promise<DOMString> encodeElementVideoFrame(Element? element,
++  Promise<DOMString> encodeElementVideoFrame(Element element,
 +                                             unsigned long width,
 +                                             unsigned long height,
 +                                             unsigned long fps,
@@ -25,10 +25,10 @@ index a1f031ffe2..4199bc357d 100644
 +  Promise<boolean> stopElementVideoStream();
  };
 diff --git a/dom/ipc/PWindowGlobal.ipdl b/dom/ipc/PWindowGlobal.ipdl
-index 91dc9ac48f..1bb73c9649 100644
+index 91dc9ac48f..2778c370a4 100644
 --- a/dom/ipc/PWindowGlobal.ipdl
 +++ b/dom/ipc/PWindowGlobal.ipdl
-@@ -107,6 +107,20 @@ both:
+@@ -107,6 +107,19 @@ both:
                     nullable StructuredCloneData aStack);
  
  parent:
@@ -36,7 +36,6 @@ index 91dc9ac48f..1bb73c9649 100644
 +    returns (nsCString data);
 +
 +  async EncodeElementVideoFrame(PaintFragment aFragment,
-+                                bool aFillOutput,
 +                                uint32_t aWidth,
 +                                uint32_t aHeight,
 +                                uint32_t aFramesPerSecond,
@@ -50,18 +49,10 @@ index 91dc9ac48f..1bb73c9649 100644
    // BrowsingContext. aTargetBC must be in the same BrowsingContextGroup as this
    // window global.
 diff --git a/dom/ipc/WindowGlobalChild.cpp b/dom/ipc/WindowGlobalChild.cpp
-index ceb57c0341..a23662b812 100644
+index ceb57c0341..fb3c741397 100644
 --- a/dom/ipc/WindowGlobalChild.cpp
 +++ b/dom/ipc/WindowGlobalChild.cpp
-@@ -18,6 +18,7 @@
- #include "mozilla/dom/CloseWatcherManager.h"
- #include "mozilla/dom/ContentChild.h"
- #include "mozilla/dom/ContentParent.h"
-+#include "mozilla/dom/DocumentInlines.h"
- #include "mozilla/dom/IdentityCredential.h"
- #include "mozilla/dom/InProcessChild.h"
- #include "mozilla/dom/InProcessParent.h"
-@@ -36,6 +37,7 @@
+@@ -36,6 +36,7 @@
  #include "mozilla/dom/WindowContext.h"
  #include "mozilla/dom/WindowGlobalActorsBinding.h"
  #include "mozilla/dom/WindowGlobalParent.h"
@@ -69,15 +60,7 @@ index ceb57c0341..a23662b812 100644
  #include "mozilla/ipc/Endpoint.h"
  #include "nsContentUtils.h"
  #include "nsDocShell.h"
-@@ -46,6 +48,7 @@
- #include "nsIHttpChannelInternal.h"
- #include "nsIURIMutator.h"
- #include "nsNetUtil.h"
-+#include "nsPresContext.h"
- #include "nsQueryObject.h"
- #include "nsScriptSecurityManager.h"
- #include "nsSerializationHelper.h"
-@@ -796,6 +799,119 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
+@@ -796,6 +797,102 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
    return JSActorManager::GetExistingActor(aName).downcast<JSWindowActorChild>();
  }
  
@@ -118,15 +101,14 @@ index ceb57c0341..a23662b812 100644
 +}
 +
 +already_AddRefed<Promise> WindowGlobalChild::EncodeElementVideoFrame(
-+    Element* aElement, uint32_t aWidth, uint32_t aHeight,
++    Element& aElement, uint32_t aWidth, uint32_t aHeight,
 +    uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
 +    const nsACString& aCodec, uint64_t aFrameIndex, ErrorResult& aRv) {
 +  RefPtr<Promise> promise = Promise::Create(mWindowGlobal->AsGlobal(), aRv);
 +  if (aRv.Failed()) {
 +    return nullptr;
 +  }
-+  if ((aElement && aElement->OwnerDoc() != mWindowGlobal->GetExtantDoc()) ||
-+      aWidth < 2 ||
++  if (aElement.OwnerDoc() != mWindowGlobal->GetExtantDoc() || aWidth < 2 ||
 +      aHeight < 2 || aWidth > 8192 || aHeight > 8192 || aWidth % 2 ||
 +      aHeight % 2 || aFramesPerSecond < 1 || aFramesPerSecond > 60 ||
 +      aBitsPerSecond < 1000 || aBitsPerSecond > 500000000 ||
@@ -135,30 +117,14 @@ index ceb57c0341..a23662b812 100644
 +    return promise.forget();
 +  }
 +
-+  dom::Document* document = mWindowGlobal->GetExtantDoc();
-+  nsPresContext* presContext = document ? document->GetPresContext() : nullptr;
-+  Maybe<gfx::IntRect> viewport;
-+  if (!aElement && presContext) {
-+    CSSIntRect visible =
-+        RoundedOut(CSSPixel::FromAppUnits(presContext->GetVisibleArea()));
-+    viewport.emplace(visible.x, visible.y, visible.width, visible.height);
-+  }
 +  gfx::PaintFragment fragment =
-+      aElement
-+          ? gfx::PaintFragment::RecordElement(aElement, 1.0f)
-+          : viewport
-+                ? gfx::PaintFragment::Record(
-+                      BrowsingContext(), viewport, 1.0f,
-+                      NS_RGB(255, 255, 255),
-+                      gfx::CrossProcessPaintFlags::DrawView |
-+                          gfx::CrossProcessPaintFlags::UseHighQualityScaling)
-+                : gfx::PaintFragment{};
++      gfx::PaintFragment::RecordElement(&aElement, 1.0f);
 +  if (fragment.IsEmpty()) {
 +    promise->MaybeReject(NS_ERROR_FAILURE);
 +    return promise.forget();
 +  }
 +
-+  SendEncodeElementVideoFrame(std::move(fragment), !aElement, aWidth, aHeight,
++  SendEncodeElementVideoFrame(std::move(fragment), aWidth, aHeight,
 +                              aFramesPerSecond, aBitsPerSecond,
 +                              nsCString(aCodec), aFrameIndex)
 +      ->Then(GetCurrentSerialEventTarget(), __func__,
@@ -198,7 +164,7 @@ index ceb57c0341..a23662b812 100644
      JS::Handle<JSObject*> aMaybeActor, const nsACString& aName,
      ErrorResult& aRv) {
 diff --git a/dom/ipc/WindowGlobalChild.h b/dom/ipc/WindowGlobalChild.h
-index 956a5313b4..3b2ed3d62c 100644
+index 956a5313b4..ad5e2f66ad 100644
 --- a/dom/ipc/WindowGlobalChild.h
 +++ b/dom/ipc/WindowGlobalChild.h
 @@ -25,6 +25,7 @@ class WindowGlobalParent;
@@ -217,7 +183,7 @@ index 956a5313b4..3b2ed3d62c 100644
 +                                                double aScale,
 +                                                ErrorResult& aRv);
 +  already_AddRefed<Promise> EncodeElementVideoFrame(
-+      Element* aElement, uint32_t aWidth, uint32_t aHeight,
++      Element& aElement, uint32_t aWidth, uint32_t aHeight,
 +      uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
 +      const nsACString& aCodec, uint64_t aFrameIndex, ErrorResult& aRv);
 +  already_AddRefed<Promise> StopElementVideoStream(ErrorResult& aRv);
@@ -226,7 +192,7 @@ index 956a5313b4..3b2ed3d62c 100644
    JSObject* WrapObject(JSContext* aCx,
                         JS::Handle<JSObject*> aGivenProto) override;
 diff --git a/dom/ipc/WindowGlobalParent.cpp b/dom/ipc/WindowGlobalParent.cpp
-index b2a1203401..227c17e1bb 100644
+index b2a1203401..bb5feef4cb 100644
 --- a/dom/ipc/WindowGlobalParent.cpp
 +++ b/dom/ipc/WindowGlobalParent.cpp
 @@ -5,8 +5,12 @@
@@ -260,7 +226,7 @@ index b2a1203401..227c17e1bb 100644
  #include "mozilla/ipc/ProtocolUtils.h"
  #include "mozilla/net/CookieServiceParent.h"
  #include "mozilla/net/NeckoParent.h"
-@@ -1112,6 +1120,159 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
+@@ -1112,6 +1120,158 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
    return promise.forget();
  }
  
@@ -326,8 +292,7 @@ index b2a1203401..227c17e1bb 100644
 +}
 +
 +mozilla::ipc::IPCResult WindowGlobalParent::RecvEncodeElementVideoFrame(
-+    gfx::PaintFragment&& aFragment, bool aFillOutput, uint32_t aWidth,
-+    uint32_t aHeight,
++    gfx::PaintFragment&& aFragment, uint32_t aWidth, uint32_t aHeight,
 +    uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
 +    const nsCString& aCodec, uint64_t aFrameIndex,
 +    EncodeElementVideoFrameResolver&& aResolve) {
@@ -337,7 +302,7 @@ index b2a1203401..227c17e1bb 100644
 +  }
 +  const ElementVideoStream::Options options{
 +      aWidth, aHeight, aFramesPerSecond, aBitsPerSecond,
-+      aCodec.EqualsLiteral("h265"), aFillOutput};
++      aCodec.EqualsLiteral("h265")};
 +  RefPtr<gfx::CrossProcessPaint::ResolvePromise> paint =
 +      gfx::CrossProcessPaint::Start(
 +          std::move(aFragment),
@@ -420,7 +385,7 @@ index b2a1203401..227c17e1bb 100644
  void WindowGlobalParent::DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
                                                const Maybe<IntRect>& aRect,
                                                float aScale,
-@@ -1590,6 +1751,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
+@@ -1590,6 +1750,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
  }
  
  void WindowGlobalParent::ActorDestroy(ActorDestroyReason aWhy) {
@@ -432,7 +397,7 @@ index b2a1203401..227c17e1bb 100644
      glean::orb::did_ever_block_response
          .EnumGet(mShouldReportHasBlockedOpaqueResponse
 diff --git a/dom/ipc/WindowGlobalParent.h b/dom/ipc/WindowGlobalParent.h
-index 5d14266e42..fc4ca25ba4 100644
+index 5d14266e42..2051dedc70 100644
 --- a/dom/ipc/WindowGlobalParent.h
 +++ b/dom/ipc/WindowGlobalParent.h
 @@ -33,11 +33,13 @@ namespace mozilla {
@@ -449,7 +414,7 @@ index 5d14266e42..fc4ca25ba4 100644
  class WindowGlobalChild;
  class JSWindowActorParent;
  class JSActorMessageMeta;
-@@ -295,6 +297,18 @@ class WindowGlobalParent final : public WindowContext,
+@@ -295,6 +297,17 @@ class WindowGlobalParent final : public WindowContext,
    mozilla::ipc::IPCResult RecvUpdateCookieJarSettings(
        const CookieJarSettingsArgs& aCookieJarSettingsArgs);
  
@@ -457,8 +422,7 @@ index 5d14266e42..fc4ca25ba4 100644
 +      gfx::PaintFragment&& aFragment,
 +      DrawElementSnapshotResolver&& aResolve);
 +  mozilla::ipc::IPCResult RecvEncodeElementVideoFrame(
-+      gfx::PaintFragment&& aFragment, bool aFillOutput, uint32_t aWidth,
-+      uint32_t aHeight,
++      gfx::PaintFragment&& aFragment, uint32_t aWidth, uint32_t aHeight,
 +      uint32_t aFramesPerSecond, uint32_t aBitsPerSecond,
 +      const nsCString& aCodec, uint64_t aFrameIndex,
 +      EncodeElementVideoFrameResolver&& aResolve);
@@ -468,7 +432,7 @@ index 5d14266e42..fc4ca25ba4 100644
    void ActorDestroy(ActorDestroyReason aWhy) override;
  
    void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
-@@ -390,6 +404,7 @@ class WindowGlobalParent final : public WindowContext,
+@@ -390,6 +403,7 @@ class WindowGlobalParent final : public WindowContext,
  
    nsCOMPtr<nsIURI> mDocumentURI;
    Maybe<nsString> mDocumentTitle;

@@ -4,6 +4,8 @@
 
 #include "nsScreencastService.h"
 
+#include "ElementVideoStream.h"
+#include "gfxContext.h"
 #include "gfxPlatform.h"
 #include "ScreencastEncoder.h"
 #include "HeadlessWidget.h"
@@ -12,11 +14,13 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "nsIDocShell.h"
 #include "nsIWidget.h"
 #include "nsIObserverService.h"
 #include "nsIRandomGenerator.h"
 #include "nsISupportsPrimitives.h"
+#include "nsITimer.h"
 #include "nsThreadManager.h"
 #include "mozilla/TimeStamp.h"
 #include "modules/desktop_capture/desktop_capturer.h"
@@ -40,7 +44,8 @@ NS_IMPL_ISUPPORTS(nsScreencastService, nsIScreencastService)
 
 namespace {
 
-const int kMaxFramesInFlight = 1;
+const uint32_t kMaxFramesInFlight = 1;
+const uint32_t kMaxNativeFramesInFlight = 8;
 
 StaticRefPtr<nsScreencastService> gScreencastService;
 
@@ -94,7 +99,12 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     int width, int height,
     int viewportWidth, int viewportHeight,
     gfx::IntMargin margin,
-    uint32_t jpegQuality)
+    uint32_t jpegQuality,
+    bool nativeVideo,
+    uint32_t fps,
+    uint32_t bitrate,
+    bool h265,
+    uint32_t contentOffsetTop)
       : mClient(client)
       , mWidget(widget)
       , mCaptureModule(std::move(capturer))
@@ -104,7 +114,12 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
       , mHeight(height)
       , mViewportWidth(viewportWidth)
       , mViewportHeight(viewportHeight)
-      , mMargin(margin) {
+      , mMargin(margin)
+      , mNativeVideo(nativeVideo)
+      , mFPS(fps)
+      , mBitrate(bitrate)
+      , mH265(h265)
+      , mContentOffsetTop(contentOffsetTop) {
   }
   ~Session() override = default;
 
@@ -118,8 +133,13 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     int width, int height,
     int viewportWidth, int viewportHeight,
     gfx::IntMargin margin,
-    uint32_t jpegQuality) {
-    return do_AddRef(new Session(client, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, jpegQuality));
+    uint32_t jpegQuality,
+    bool nativeVideo,
+    uint32_t fps,
+    uint32_t bitrate,
+    bool h265,
+    uint32_t contentOffsetTop) {
+    return do_AddRef(new Session(client, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, jpegQuality, nativeVideo, fps, bitrate, h265, contentOffsetTop));
   }
 
   webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> ReuseCapturer(nsIWidget* widget) {
@@ -129,6 +149,34 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
   }
 
   bool Start() {
+    if (mNativeVideo) {
+      dom::ElementVideoStream::Options options{
+          static_cast<uint32_t>(mWidth), static_cast<uint32_t>(mHeight),
+          mFPS, mBitrate, mH265};
+      dom::ElementVideoStream::Create(options)->Then(
+          GetCurrentSerialEventTarget(), __func__,
+          [self = RefPtr{this}](RefPtr<dom::ElementVideoStream> aStream) {
+            if (self->mStopped) {
+              aStream->Shutdown();
+              return;
+            }
+            self->mNativeStream = std::move(aStream);
+            self->mNativeReady = true;
+            MOZ_ALWAYS_SUCCEEDS(NS_NewTimerWithFuncCallback(
+                getter_AddRefs(self->mNativeTimer),
+                [](nsITimer*, void* aClosure) {
+                  static_cast<Session*>(aClosure)->CaptureNativeFrame();
+                },
+                self.get(), TimeDuration::FromSeconds(1.0 / self->mFPS),
+                nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP,
+                "nsScreencastService::CaptureNativeFrame"_ns));
+          },
+          [](const MediaResult& aError) {
+            fprintf(stderr, "Failed to create native screencast encoder: %s\n",
+                    aError.Description().get());
+          });
+      return true;
+    }
     webrtc::VideoCaptureCapability capability;
     // The size is ignored in fact.
     capability.width = 1280;
@@ -149,16 +197,26 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
   }
 
   void Stop() {
-    if (mStopped) {
+    if (mStopped.exchange(true)) {
       fprintf(stderr, "Screencast session has already been stopped\n");
       return;
     }
-    mStopped = true;
-    if (mEncoder)
-      mCaptureModule->DeRegisterCaptureDataCallback(this);
-    else
-      mCaptureModule->DeRegisterRawFrameCallback(this);
-    mCaptureModule->StopCaptureCounted();
+    mNativeReady = false;
+    if (mNativeTimer) {
+      mNativeTimer->Cancel();
+      mNativeTimer = nullptr;
+    }
+    if (mCaptureModule) {
+      if (mEncoder)
+        mCaptureModule->DeRegisterCaptureDataCallback(this);
+      else
+        mCaptureModule->DeRegisterRawFrameCallback(this);
+      mCaptureModule->StopCaptureCounted();
+    }
+    if (mNativeStream) {
+      mNativeStream->Shutdown();
+      mNativeStream = nullptr;
+    }
     if (mEncoder) {
       mEncoder->finish([this, protect = RefPtr{this}] {
         NS_DispatchToMainThread(NS_NewRunnableFunction(
@@ -172,6 +230,8 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
   }
 
   void ScreencastFrameAck() {
+    if (mNativeVideo)
+      return;
     if (mFramesInFlight.load() == 0) {
       fprintf(stderr, "ScreencastFrameAck is called while there are no inflight frames\n");
       return;
@@ -292,19 +352,109 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
         }));
   }
 
+  void CaptureNativeFrame() {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (mStopped || !mNativeReady || !mNativeStream ||
+        mFramesInFlight.load() >= kMaxNativeFramesInFlight)
+      return;
+
+    WindowRenderer* renderer = mWidget->GetWindowRenderer();
+    layers::WebRenderLayerManager* layerManager =
+        renderer ? renderer->AsWebRender() : nullptr;
+    const gfx::IntSize widgetSize = mWidget->GetClientSize().ToUnknownSize();
+    if (!layerManager || widgetSize.IsEmpty())
+      return;
+
+    RefPtr<gfx::DrawTarget> target =
+        gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
+            widgetSize, gfx::SurfaceFormat::B8G8R8A8);
+    UniquePtr<gfxContext> context =
+        target ? gfxContext::CreateOrNull(target) : nullptr;
+    if (!context ||
+        !layerManager->BeginTransactionWithTarget(context.get(), nsCString()) ||
+        !layerManager->EndEmptyTransaction())
+      return;
+
+    RefPtr<gfx::SourceSurface> snapshot = target->Snapshot();
+    RefPtr<gfx::DataSourceSurface> source =
+        snapshot ? snapshot->GetDataSurface() : nullptr;
+    const uint32_t top = std::min(
+        mContentOffsetTop, static_cast<uint32_t>(widgetSize.height));
+    const int pageWidth = mViewportWidth
+                              ? std::min(mViewportWidth, widgetSize.width)
+                              : widgetSize.width;
+    const int availableHeight = widgetSize.height - top;
+    const int pageHeight = mViewportHeight
+                               ? std::min(mViewportHeight, availableHeight)
+                               : availableHeight;
+    if (!source || pageWidth <= 1 || pageHeight <= 1)
+      return;
+
+    RefPtr<gfx::DataSourceSurface> surface =
+        gfx::Factory::CreateDataSourceSurface(
+            gfx::IntSize(pageWidth, pageHeight),
+            gfx::SurfaceFormat::B8G8R8X8);
+    if (!surface)
+      return;
+    {
+      gfx::DataSourceSurface::ScopedMap sourceMap(
+          source, gfx::DataSourceSurface::MapType::READ);
+      gfx::DataSourceSurface::ScopedMap destinationMap(
+          surface, gfx::DataSourceSurface::MapType::WRITE);
+      if (!sourceMap.IsMapped() || !destinationMap.IsMapped())
+        return;
+      for (int y = 0; y < pageHeight; ++y) {
+        memcpy(destinationMap.GetData() + y * destinationMap.GetStride(),
+               sourceMap.GetData() + (top + y) * sourceMap.GetStride(),
+               pageWidth * 4);
+      }
+    }
+
+    mFramesInFlight.fetch_add(1);
+    const uint64_t frameIndex = mFrameIndex.fetch_add(1);
+    const double timestamp = ScreencastTimestampSeconds();
+    mNativeStream->EncodeSurface(std::move(surface), frameIndex)
+        ->Then(
+            GetCurrentSerialEventTarget(), __func__,
+            [self = RefPtr{this}, pageWidth, pageHeight, timestamp](
+                nsCString&& aPacket) {
+              self->mFramesInFlight.fetch_sub(1);
+              if (self->mStopped || aPacket.IsEmpty())
+                return;
+              nsCString base64;
+              if (NS_FAILED(Base64Encode(aPacket, base64)))
+                return;
+              NS_ConvertUTF8toUTF16 utf16(base64);
+              self->mClient->ScreencastFrame(utf16, pageWidth, pageHeight,
+                                             timestamp);
+            },
+            [self = RefPtr{this}](const MediaResult&) {
+              self->mFramesInFlight.fetch_sub(1);
+            });
+  }
+
  private:
   RefPtr<nsIScreencastServiceClient> mClient;
   nsIWidget* mWidget;
   webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> mCaptureModule;
   std::unique_ptr<ScreencastEncoder> mEncoder;
   uint32_t mJpegQuality;
-  bool mStopped = false;
+  std::atomic<bool> mStopped = false;
   std::atomic<uint32_t> mFramesInFlight = 0;
   int mWidth;
   int mHeight;
   int mViewportWidth;
   int mViewportHeight;
   gfx::IntMargin mMargin;
+  bool mNativeVideo;
+  uint32_t mFPS;
+  uint32_t mBitrate;
+  bool mH265;
+  uint32_t mContentOffsetTop;
+  std::atomic<bool> mNativeReady = false;
+  std::atomic<uint64_t> mFrameIndex = 0;
+  nsCOMPtr<nsITimer> mNativeTimer;
+  RefPtr<dom::ElementVideoStream> mNativeStream;
 };
 
 
@@ -324,7 +474,7 @@ nsScreencastService::nsScreencastService() = default;
 nsScreencastService::~nsScreencastService() {
 }
 
-nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aClient, nsIDocShell* aDocShell, bool isVideo, const nsACString& aVideoFileName, uint32_t width, uint32_t height, uint32_t quality, uint32_t viewportWidth, uint32_t viewportHeight, uint32_t offsetTop, nsAString& sessionId) {
+nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aClient, nsIDocShell* aDocShell, bool isVideo, const nsACString& aVideoFileName, uint32_t width, uint32_t height, uint32_t quality, uint32_t viewportWidth, uint32_t viewportHeight, uint32_t offsetTop, bool nativeVideo, uint32_t fps, uint32_t bitrate, const nsACString& codec, nsAString& sessionId) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread(), "Screencast service must be started on the Main thread.");
 
   PresShell* presShell = aDocShell->GetPresShell();
@@ -335,15 +485,17 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
     return NS_ERROR_UNEXPECTED;
 
   webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> capturer = nullptr;
-  for (auto& it : mIdToSession) {
-    capturer = it.second->ReuseCapturer(widget);
-    if (capturer)
-      break;
+  if (!nativeVideo) {
+    for (auto& it : mIdToSession) {
+      capturer = it.second->ReuseCapturer(widget);
+      if (capturer)
+        break;
+    }
+    if (!capturer)
+      capturer = CreateWindowCapturer(widget);
+    if (!capturer)
+      return NS_ERROR_FAILURE;
   }
-  if (!capturer)
-    capturer = CreateWindowCapturer(widget);
-  if (!capturer)
-    return NS_ERROR_FAILURE;
 
   gfx::IntMargin margin;
   // Screen bounds is the widget location on screen.
@@ -362,7 +514,7 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
 
   nsCString error;
   std::unique_ptr<ScreencastEncoder> encoder;
-  if (isVideo) {
+  if (isVideo && !nativeVideo) {
     encoder = ScreencastEncoder::create(error, PromiseFlatCString(aVideoFileName), width, height, margin);
     if (!encoder) {
       fprintf(stderr, "Failed to create ScreencastEncoder: %s\n", error.get());
@@ -375,7 +527,7 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
   NS_ENSURE_SUCCESS(rv, rv);
   sessionId = uid;
 
-  auto session = Session::Create(aClient, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, isVideo ? 0 : quality);
+  auto session = Session::Create(aClient, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, isVideo ? 0 : quality, nativeVideo, fps, bitrate, codec.EqualsLiteral("h265"), offsetTop);
   if (!session->Start())
     return NS_ERROR_FAILURE;
   mIdToSession.emplace(sessionId, std::move(session));

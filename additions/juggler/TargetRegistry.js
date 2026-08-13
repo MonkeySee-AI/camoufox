@@ -923,7 +923,7 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, viewport.width, viewport.height, devicePixelRatio * rect.top);
+    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, false, 25, 0, '');
     this._videoRecordingInfo = { sessionId, file };
     this.emit(PageTarget.Events.ScreencastStarted);
   }
@@ -940,13 +940,22 @@ export class PageTarget {
     return this._videoRecordingInfo;
   }
 
-  async startScreencast({ width, height, quality }) {
+  async startScreencast({ width = 1280, height = 720, quality, video = false, fps = 25,
+                          bitrate = 12000000, codec = 'h264' }) {
     // On Mac the window may not yet be visible when TargetCreated and its
     // NSWindow.windowNumber may be -1, so we wait until the window is known
     // to be initialized and visible.
     await this.windowReady();
     if (width < 10 || width > 10000 || height < 10 || height > 10000)
       throw new Error("Invalid size");
+    if (video && (width > 8192 || height > 8192 || width % 2 || height % 2))
+      throw new Error('Native video dimensions must be even and at most 8192');
+    if (video && (fps < 1 || fps > 60))
+      throw new Error('Native video FPS must be between 1 and 60');
+    if (video && (bitrate < 1000 || bitrate > 500000000))
+      throw new Error('Native video bitrate must be between 1000 and 500000000');
+    if (video && codec !== 'h264' && codec !== 'h265')
+      throw new Error('Native video codec must be h264 or h265');
 
     const docShell = this._gBrowser.ownerGlobal.docShell;
     // Exclude address bar and navigation control from the video.
@@ -964,7 +973,7 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
+    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, video, '', width, height, quality || 90, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, video, fps, bitrate, codec);
     this._screencastRecordingInfo = { screencastId };
     return { screencastId };
   }

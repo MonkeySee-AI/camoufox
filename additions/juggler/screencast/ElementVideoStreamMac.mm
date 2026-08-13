@@ -34,9 +34,10 @@ bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
             initWithIOSurface:(IOSurface*)aDestination->GetIOSurfaceRef().get()]
             autorelease];
     NSError* error = nil;
-    return [context startTaskToRender:image
-                        toDestination:destination
-                                error:&error] != nil;
+    CIRenderTask* task = [context startTaskToRender:image
+                                     toDestination:destination
+                                             error:&error];
+    return task && [task waitUntilCompletedAndReturnError:&error];
   }
 }
 
