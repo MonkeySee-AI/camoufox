@@ -16,7 +16,6 @@ import argparse
 import asyncio
 import contextlib
 import hmac
-import importlib.util
 import json
 import secrets
 import signal
@@ -24,7 +23,6 @@ import ssl
 import sys
 import time
 from fractions import Fraction
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from aiohttp import web
@@ -43,14 +41,12 @@ from aiortc.mediastreams import MediaStreamError, convert_timebase
 from aiortc.rtcrtpparameters import RTCRtcpFeedback, RTCRtpCodecParameters
 from av import Packet
 from playwright.async_api import async_playwright
-
-ROOT = Path(__file__).parents[1]
-CORE_SPEC = importlib.util.spec_from_file_location(
-    "stream_juggler_screencast", ROOT / "scripts" / "stream-juggler-screencast.py"
+from rotunda.screencast import (
+    normalize_frame_data,
+    parse_viewport,
+    resolve_page,
+    start_screencast,
 )
-assert CORE_SPEC and CORE_SPEC.loader
-CORE = importlib.util.module_from_spec(CORE_SPEC)
-CORE_SPEC.loader.exec_module(CORE)
 
 RSE2_HEADER_SIZE = 45
 VIDEO_TIME_BASE = Fraction(1, 1_000_000)
@@ -62,6 +58,7 @@ class NativeFrame(NamedTuple):
     keyframe: bool
     pts_us: int
     duration_us: int
+    crop: tuple[int, int, int, int]
     data: bytes
 
 
@@ -224,6 +221,10 @@ def parse_native_frames(packet: bytes) -> list[NativeFrame]:
         size = int.from_bytes(packet[offset + 5 : offset + 9], "big")
         pts_us = int.from_bytes(packet[offset + 9 : offset + 17], "big")
         duration_us = int.from_bytes(packet[offset + 17 : offset + 21], "big")
+        crop = tuple(
+            int.from_bytes(packet[offset + at : offset + at + 4], "big")
+            for at in (29, 33, 37, 41)
+        )
         payload_start = offset + RSE2_HEADER_SIZE
         payload_end = payload_start + size
         if payload_end > len(packet):
@@ -233,6 +234,7 @@ def parse_native_frames(packet: bytes) -> list[NativeFrame]:
                 bool(packet[offset + 4] & 1),
                 pts_us,
                 duration_us,
+                crop,
                 packet[payload_start:payload_end],
             )
         )
@@ -252,6 +254,8 @@ class NativeVideoTrack(MediaStreamTrack):
         self.frames = 0
         self.bytes = 0
         self.dropped = 0
+        self.crop: tuple[int, int, int, int] | None = None
+        self.on_crop: Any = None
 
     def push(self, packet: bytes) -> None:
         if self.readyState == "ended":
@@ -259,6 +263,10 @@ class NativeVideoTrack(MediaStreamTrack):
         for frame in parse_native_frames(packet):
             self.frames += 1
             self.bytes += len(frame.data)
+            if frame.crop != self.crop:
+                self.crop = frame.crop
+                if self.on_crop:
+                    self.on_crop(frame.crop)
             if frame.keyframe and self.codec == "h265" and not self.keyframe_nals:
                 self.keyframe_nals = [
                     ((nal[0] >> 1) & 0x3F, len(nal))
@@ -309,16 +317,42 @@ def viewer_html(
 <style>
 html,body{{margin:0;height:100%;background:#080a0f;color:#e8edf7;font:14px system-ui}}
 body{{display:grid;grid-template-rows:1fr auto;overflow:hidden}}
-video{{width:100%;height:100%;object-fit:contain;background:#000}}
+#stage{{position:relative;overflow:hidden}}
+#frame{{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);overflow:hidden;background:#000}}
+video{{position:absolute;left:0;top:0}}
 pre{{position:fixed;top:10px;left:10px;margin:0;padding:9px 11px;border-radius:7px;background:#000b;line-height:1.4}}
 small{{padding:8px 12px;color:#9ca8bb}}
 </style>
-<video autoplay muted playsinline></video><pre>connecting…</pre>
+<div id=stage><div id=frame><video autoplay muted playsinline></video></div></div><pre>connecting…</pre>
 <small>Native Gecko {codec.upper()} → RTP/SRTP pass-through; no decode or re-encode on the server.</small>
 <script>
 const video=document.querySelector('video'), output=document.querySelector('pre');
+const stage=document.getElementById('stage'), frame=document.getElementById('frame');
 const pc=new RTCPeerConnection({{iceServers:{json.dumps(ice_servers)}}});
 window.__webrtc={{connectionState:'new'}};window.__webrtcSamples=[];
+// The RSE2 crop rectangle arrives on the metadata data channel; present only
+// that region of the fixed decoder canvas, shrink-wrapped to the viewport.
+window.__crop=null;
+function layout(){{
+  const W=video.videoWidth,H=video.videoHeight;
+  if(!W||!H)return;
+  const crop=window.__crop;
+  const region=crop&&crop.width&&crop.height?crop:{{x:0,y:0,width:W,height:H}};
+  const scale=Math.min(stage.clientWidth/region.width,stage.clientHeight/region.height);
+  frame.style.width=region.width*scale+'px';frame.style.height=region.height*scale+'px';
+  video.style.width=W*scale+'px';video.style.height=H*scale+'px';
+  video.style.left=-region.x*scale+'px';video.style.top=-region.y*scale+'px';
+}}
+pc.ondatachannel=event=>{{
+  event.channel.onmessage=message=>{{
+    try{{
+      const data=JSON.parse(message.data);
+      if(data.type==='crop'&&data.width&&data.height){{window.__crop=data;layout();}}
+    }}catch(error){{}}
+  }};
+}};
+new ResizeObserver(layout).observe(stage);
+video.addEventListener('resize',layout);
 window.__latencySamples=[];window.__receiveToDisplaySamples=[];window.__presentedFrames=0;
 let previous=null,resetAt=performance.now(),resetPresented=0,resetCounters={{}};
 const transceiver=pc.addTransceiver('video',{{direction:'recvonly'}});
@@ -453,6 +487,31 @@ async def start_server(
             track = NativeVideoTrack(args.codec)
             pc = RTCPeerConnection(RTCConfiguration(iceServers=rtc_ice))
             state.update(pc=pc, track=track)
+            # RTP carries only the bitstream, so the RSE2 crop rectangle rides
+            # a data channel; the viewer shrink-wraps the presented region.
+            metadata = pc.createDataChannel("metadata")
+
+            def send_crop(crop: tuple[int, int, int, int]) -> None:
+                if metadata.readyState == "open":
+                    metadata.send(
+                        json.dumps(
+                            {
+                                "type": "crop",
+                                "x": crop[0],
+                                "y": crop[1],
+                                "width": crop[2],
+                                "height": crop[3],
+                            }
+                        )
+                    )
+
+            track.on_crop = send_crop
+
+            @metadata.on("open")
+            def metadata_open() -> None:
+                if track.crop:
+                    send_crop(track.crop)
+
             sender = pc.addTrack(track)
             transceiver = next(
                 item for item in pc.getTransceivers() if item.sender == sender
@@ -520,7 +579,7 @@ async def stream(args: argparse.Namespace) -> None:
     started = ended = 0.0
     try:
         async with async_playwright() as playwright:
-            browser, page = await CORE.resolve_page(playwright, args)
+            browser, page = await resolve_page(playwright, args)
             try:
                 await page.goto(args.url)
                 if args.selector:
@@ -531,9 +590,9 @@ async def stream(args: argparse.Namespace) -> None:
                 def on_frame(frame: dict[str, object]) -> None:
                     track = state.get("track")
                     if track:
-                        track.push(CORE.normalize_frame_data(frame["data"]))
+                        track.push(normalize_frame_data(frame["data"]))
 
-                await CORE.start_screencast(
+                await start_screencast(
                     page,
                     on_frame,
                     quality=90,
@@ -637,8 +696,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--new-context", action="store_true")
     parser.add_argument("--new-page", action="store_true")
     parser.add_argument("--page-index", type=int, default=0)
-    parser.add_argument("--viewport", type=CORE.parse_viewport, default="1280x720")
-    parser.add_argument("--video-size", type=CORE.parse_viewport, default="3840x2160")
+    parser.add_argument("--viewport", type=parse_viewport, default="1280x720")
+    parser.add_argument("--video-size", type=parse_viewport, default="3840x2160")
     parser.add_argument("--fps", type=int, choices=range(1, 61), default=60)
     parser.add_argument("--bitrate-mbps", type=float, default=35)
     parser.add_argument("--codec", choices=("auto", "h264", "h265"), default="auto")

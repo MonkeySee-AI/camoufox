@@ -1,11 +1,11 @@
 diff --git a/gfx/layers/wr/WebRenderBridgeParent.cpp b/gfx/layers/wr/WebRenderBridgeParent.cpp
-index bcf796c0d4..12325ff6a0 100644
+index a1a57c5eec..3d32396c6c 100644
 --- a/gfx/layers/wr/WebRenderBridgeParent.cpp
 +++ b/gfx/layers/wr/WebRenderBridgeParent.cpp
-@@ -2027,5 +2027,18 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvGetSnapshot(
+@@ -2027,6 +2027,20 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvGetSnapshot(
                              Range<uint8_t>(buffer, buffer_size.value()),
                              aNeedsYFlip);
--
+ 
 +  const Maybe<int32_t> stride = ImageDataSerializer::ComputeRGBStride(
 +      bufferTexture->GetFormat(), size.width);
 +  const size_t packedStride = static_cast<size_t>(size.width) * 4;
@@ -22,3 +22,4 @@ index bcf796c0d4..12325ff6a0 100644
 +
    return IPC_OK();
  }
+ 

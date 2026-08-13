@@ -1,19 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import io
-from pathlib import Path
 
 from PIL import Image
 from playwright.async_api import Page
+from rotunda.screencast import image_size, normalize_frame_data, start_screencast
 from tests.server import Server
-
-SCRIPT = Path(__file__).parents[3] / "scripts" / "stream-juggler-screencast.py"
-SPEC = importlib.util.spec_from_file_location("stream_juggler_screencast", SCRIPT)
-assert SPEC and SPEC.loader
-STREAM = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(STREAM)
 
 
 async def capture_element_frame(page: Page, selector: str) -> Image.Image:
@@ -21,12 +14,12 @@ async def capture_element_frame(page: Page, selector: str) -> Image.Image:
     first_frame = asyncio.Event()
 
     def on_frame(frame: dict[str, object]) -> None:
-        data = STREAM.normalize_frame_data(frame["data"])
+        data = normalize_frame_data(frame["data"])
         if data.startswith(b"\x89PNG\r\n\x1a\n"):
             frames.append(data)
             first_frame.set()
 
-    await STREAM.start_screencast(
+    await start_screencast(
         page, on_frame, quality=91, size=None, selector=selector, fps=25
     )
     try:
@@ -51,10 +44,10 @@ async def test_element_stream_tracks_resizing_offscreen_dom_target(page: Page) -
     first_frame = asyncio.Event()
 
     def on_frame(frame: dict[str, object]) -> None:
-        frames.append(STREAM.normalize_frame_data(frame["data"]))
+        frames.append(normalize_frame_data(frame["data"]))
         first_frame.set()
 
-    await STREAM.start_screencast(
+    await start_screencast(
         page,
         on_frame,
         quality=91,
@@ -87,7 +80,7 @@ async def test_element_stream_tracks_resizing_offscreen_dom_target(page: Page) -
                 {
                     (size["width"], size["height"])
                     for frame in frames
-                    if (size := STREAM.image_size(frame))
+                    if (size := image_size(frame))
                 }
             )
             < 3
@@ -105,7 +98,7 @@ async def test_element_stream_tracks_resizing_offscreen_dom_target(page: Page) -
     )
     captured_sizes = {
         (size["width"], size["height"])
-        for size in map(STREAM.image_size, frames)
+        for size in map(image_size, frames)
         if size
     }
     assert captured_sizes >= {

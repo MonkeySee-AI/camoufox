@@ -4,13 +4,20 @@ Viewport and selector streams share one encoder pipeline:
 
 `WebRender compositor readback / element paint recording → fixed native video surface → Gecko PEMFactory → Annex B`
 
-Juggler transports compressed packets with their native timestamps. The POC
-client decodes them directly with WebCodecs and presents the newest decoded
-frame on a fixed canvas; PNG, Python image work, FFmpeg, and MSE are absent.
+Juggler transports compressed packets with their native timestamps. Two
+clients consume them; PNG, Python image work, FFmpeg, and MSE are absent:
+
+- `scripts/stream-selector-webrtc.py` — the primary client. Repacketizes the
+  Annex B stream as RTP/SRTP and serves a WebRTC viewer page, for embedding a
+  live browser preview in another web application. The RSE2 crop rectangle
+  rides a `metadata` data channel so the viewer presents only the selected
+  element's region of the fixed decoder canvas.
+- `scripts/stream-selector-low-latency.py` — chunked-HTTP/WebCodecs client;
+  the integration-test harness and local benchmark.
 
 | Platform | Working path | 4K60 target |
 | --- | --- | --- |
-| macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Implemented and measured at 4K60 headed and headless |
+| macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Measured at 4K60 headed (compositor IOSurface path); headless uses a CPU WebRender readback that preserves correctness but is not the 4K60 design |
 | Microsoft Windows | Not currently supported | D3D11 texture wrapped with `MFCreateDXGISurfaceBuffer` |
 | Linux | Not currently supported | DMA-BUF imported by VAAPI/NVENC in RDD/GPU |
 
@@ -20,7 +27,8 @@ Windows; production support needs GPU-native frame transport and codec
 negotiation rather than relying on the current CPU fallback.
 
 Frames use a fixed even-sized canvas so resizes do not recreate the encoder.
-Selector recordings preserve their native size and center over opaque white.
+Selector recordings preserve their native size, composited over opaque white
+inside the content rectangle; the letterbox outside it is black.
 Selector-less recordings read the already-composited WebRender window, crop out
 browser controls, and fill the output canvas. This avoids OS screen-capture
 permissions, occlusion, and off-screen-window failures. Snapshot readback is
@@ -41,6 +49,10 @@ decoder while a canvas or popover shrink-wraps the resizing element. Each is:
 
 `RSE2 | flags:u8 | size:u32be | pts_us:u64be | duration_us:u32be | width:u32be | height:u32be | crop_x:u32be | crop_y:u32be | crop_width:u32be | crop_height:u32be | Annex-B bytes`
 
+A capture error (for example the selected element being detached) stops the
+screencast rather than erroring silently; restart the stream after re-resolving
+the selector.
+
 Run the real browser integration and local benchmark with:
 
 ```sh
@@ -48,6 +60,7 @@ uv run --project . --package rotunda-tests --group playwright-tests \
   pytest -q --integration --headless \
   __tests__/playwright/async/test_element_stream_video.py
 
+python3 -m http.server 8765 &  # serves scripts/resizing-element-stream-demo.html
 uv run scripts/stream-selector-low-latency.py \
   --url http://127.0.0.1:8765/scripts/resizing-element-stream-demo.html \
   --video-size 3840x2160 --fps 60 --bitrate-mbps 35 \
@@ -55,3 +68,5 @@ uv run scripts/stream-selector-low-latency.py \
 ```
 
 Add `--selector '#stream-target'` to stream only that DOM subtree instead.
+`scripts/stream-selector-webrtc.py` takes the same driving options and serves
+the WebRTC viewer instead of the chunked-HTTP one.

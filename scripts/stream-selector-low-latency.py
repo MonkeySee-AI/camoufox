@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import importlib.util
 import signal
 import sys
 import threading
@@ -21,17 +20,14 @@ import time
 from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 from playwright.async_api import async_playwright
-
-ROOT = Path(__file__).parents[1]
-CORE_SPEC = importlib.util.spec_from_file_location(
-    "stream_juggler_screencast", ROOT / "scripts" / "stream-juggler-screencast.py"
+from rotunda.screencast import (
+    normalize_frame_data,
+    parse_viewport,
+    resolve_page,
+    start_screencast,
 )
-assert CORE_SPEC and CORE_SPEC.loader
-CORE = importlib.util.module_from_spec(CORE_SPEC)
-CORE_SPEC.loader.exec_module(CORE)
 
 
 class NativePacketStream:
@@ -284,7 +280,7 @@ async def stream(args: argparse.Namespace) -> None:
 
     try:
         async with async_playwright() as playwright:
-            browser, page = await CORE.resolve_page(playwright, args)
+            browser, page = await resolve_page(playwright, args)
             client_browser = viewer = None
             try:
                 if args.url:
@@ -302,14 +298,14 @@ async def stream(args: argparse.Namespace) -> None:
 
                 def on_frame(frame: dict[str, object]) -> None:
                     nonlocal benchmark_frames, benchmark_bytes, benchmark_started
-                    packet = CORE.normalize_frame_data(frame["data"])
+                    packet = normalize_frame_data(frame["data"])
                     if not benchmark_started:
                         benchmark_started = time.monotonic()
                     benchmark_frames += len(parse_native_frames(packet))
                     benchmark_bytes += len(packet)
                     packets.update(packet)
 
-                await CORE.start_screencast(
+                await start_screencast(
                     page,
                     on_frame,
                     quality=90,
@@ -403,8 +399,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--new-context", action="store_true")
     parser.add_argument("--new-page", action="store_true")
     parser.add_argument("--page-index", type=int, default=0)
-    parser.add_argument("--viewport", type=CORE.parse_viewport, default="1280x720")
-    parser.add_argument("--video-size", type=CORE.parse_viewport, default="1280x720")
+    parser.add_argument("--viewport", type=parse_viewport, default="1280x720")
+    parser.add_argument("--video-size", type=parse_viewport, default="1280x720")
     parser.add_argument("--fps", type=int, choices=range(1, 61), default=60)
     parser.add_argument("--bitrate-mbps", type=float, default=12)
     parser.add_argument("--codec", choices=("auto", "h264", "h265"), default="auto")

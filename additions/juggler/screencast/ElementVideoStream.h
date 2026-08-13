@@ -20,6 +20,12 @@ class EncoderAgent;
 
 namespace dom {
 
+// A persistent native video stream: frames rendered from element paint
+// recordings, CPU surfaces, or IOSurfaces are encoded by Gecko's platform
+// encoder and returned as RSE2 packets. Only implemented on macOS; Create()
+// rejects elsewhere. Encoding is always pipelined — Create() rejects if the
+// selected platform encoder cannot pipeline — so callers bound frames in
+// flight themselves (kMaxNativeFramesInFlight / kMaxElementFramesInFlight).
 class ElementVideoStream final {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ElementVideoStream)
@@ -53,32 +59,24 @@ class ElementVideoStream final {
   void Shutdown();
 
  private:
-  struct PendingEncode {
+  struct Frame {
     UniquePtr<gfx::CrossProcessPaint::ResolvedFragmentMap> mFragments;
     RefPtr<gfx::DataSourceSurface> mSurface;
 #ifdef XP_MACOSX
     RefPtr<MacIOSurface> mIOSurface;
     gfx::IntRect mSourceRect;
 #endif
-    uint64_t mFrameIndex;
-    RefPtr<EncodePromise::Private> mPromise;
+    uint64_t mFrameIndex = 0;
   };
 
   explicit ElementVideoStream(const Options& aOptions);
   ~ElementVideoStream();
-  void EncodeNow(PendingEncode&& aEncode);
-  void EncodeDone();
+  RefPtr<EncodePromise> EncodeFrame(Frame&& aFrame);
 
   Options mOptions;
   RefPtr<EncoderAgent> mEncoder;
-  UniquePtr<PendingEncode> mPendingEncode;
-  bool mPipelined = false;
-  bool mEncoding = false;
+  uint64_t mNextKeyframeIndex = 0;
   bool mShutdown = false;
-
-#ifdef XP_MACOSX
-  RefPtr<MacIOSurface> mIOSurface;
-#endif
 };
 
 }  // namespace dom

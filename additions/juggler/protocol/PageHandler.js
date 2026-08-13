@@ -27,6 +27,22 @@ function isHumanizeEnabled() {
   return ChromeUtils.rotundaGetBool('humanize.enabled', false);
 }
 
+// Bound live-video latency and memory: when encoding falls behind, capture
+// ticks are skipped instead of queueing frames that are already stale. Mirrors
+// kMaxNativeFramesInFlight in nsScreencastService.cpp.
+const kMaxElementFramesInFlight = 8;
+// Capture failures can be transient (encoder still warming up, an element
+// briefly unmounted by a SPA route change), so the loops only stop after this
+// many consecutive failures — or immediately when the element is detached.
+const kMaxConsecutiveCaptureFailures = 60;
+// Empty video frames are the routine no-frame-this-tick signal, so a broken
+// stream that only ever returns empties is caught by elapsed time instead.
+const kElementVideoStallTimeoutMs = 10000;
+
+function isPermanentCaptureError(error) {
+  return String(error?.message ?? error).includes('detached from document');
+}
+
 function pngSize(data) {
   const header = atob(data.slice(0, 32));
   if (header.length < 24 || header.slice(1, 4) !== 'PNG')
@@ -219,7 +235,10 @@ export class PageHandler {
   }
 
   async dispose() {
-    await this._stopElementScreencast();
+    // Tear down synchronously: the loop stops and the content-side stop is
+    // posted before the channel goes away; awaiting a content round trip here
+    // would leave live event listeners emitting into a disposed session.
+    void this._stopElementScreencast();
     this._contentPage.dispose();
     for (const watcher of this._pendingEventWatchers)
       watcher.dispose();
@@ -882,15 +901,36 @@ export class PageHandler {
     return await this._pageTarget.setInterceptFileChooserDialog(enabled);
   }
 
-  async ['Page.startScreencast'](options) {
-    if (options.video && AppConstants.platform !== 'macosx')
+  async ['Page.startScreencast'](options = {}) {
+    // Single validation-and-defaults site for every screencast mode; the
+    // layers below (TargetRegistry, PageAgent, native code) receive resolved
+    // values and only keep cheap sanity checks.
+    const {width = 1280, height = 720, quality = 90, frameId, objectId,
+           fps = 25, video = false, bitrate = 12000000, codec = 'h264'} = options;
+    if (video && AppConstants.platform !== 'macosx')
       throw new Error('Native video screencast is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.');
+    if (fps < 1 || fps > 60)
+      throw new Error('Screencast FPS must be between 1 and 60');
+    if (video) {
+      if (width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2)
+        throw new Error('Native video dimensions must be even and between 2 and 8192');
+      if (bitrate < 1000 || bitrate > 500000000)
+        throw new Error('Native video bitrate must be between 1000 and 500000000');
+      if (codec !== 'h264' && codec !== 'h265')
+        throw new Error('Native video codec must be h264 or h265');
+    }
     // Selector capture must paint in the content process to exclude surrounding
     // pixels. Selectorless capture stays in the parent/compositor, which enables
     // the headed-macOS IOSurface fast path.
-    if (options.objectId || options.frameId)
-      return await this._startElementScreencast(options);
-    return await this._pageTarget.startScreencast(options);
+    if (objectId || frameId)
+      return await this._startElementScreencast({frameId, objectId, width, height, fps, video, bitrate, codec});
+    if (this._elementScreencast)
+      throw new Error('Screencast is already running');
+    if (width < 10 || width > 10000 || height < 10 || height > 10000)
+      throw new Error('Invalid size');
+    if (quality < 1 || quality > 100)
+      throw new Error('Screencast quality must be between 1 and 100');
+    return await this._pageTarget.startScreencast({width, height, quality, fps, video, bitrate, codec});
   }
 
   async ['Page.screencastFrameAck'](options) {
@@ -909,23 +949,13 @@ export class PageHandler {
     await this._pageTarget.stopScreencast(options);
   }
 
-  async _startElementScreencast({frameId, objectId, fps = 25, video = false,
-                                 width = 1280, height = 720, bitrate = 12000000,
-                                 codec = 'h264'}) {
+  async _startElementScreencast({frameId, objectId, width, height, fps, video,
+                                 bitrate, codec}) {
     if (!frameId || !objectId)
       throw new Error('Element screencast requires frameId and objectId');
-    if (this._elementScreencast)
+    if (this._elementScreencast || this._pageTarget.screencastInfo())
       throw new Error('Screencast is already running');
-    if (fps < 1 || fps > 60)
-      throw new Error('Element screencast FPS must be between 1 and 60');
-    if (video && (width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2))
-      throw new Error('Native video dimensions must be even and between 2 and 8192');
-    if (video && (bitrate < 1000 || bitrate > 500000000))
-      throw new Error('Native video bitrate must be between 1000 and 500000000');
-    if (video && codec !== 'h264' && codec !== 'h265')
-      throw new Error('Native video codec must be h264 or h265');
 
-    await this._contentPage.send('startElementScreencast', {frameId, objectId, video});
     const state = {
       id: helper.generateId(),
       interval: 1000 / fps,
@@ -937,45 +967,44 @@ export class PageHandler {
       fps,
       bitrate,
       codec,
-      frameIndex: 0,
+      startedAt: Date.now(),
+      lastFrameIndex: -1,
+      lastDataAt: Date.now(),
       capturesInFlight: 0,
+      consecutiveFailures: 0,
       nextFrameAt: Date.now(),
     };
+    // Claim the slot before the first await so concurrent starts and a stop
+    // arriving mid-start observe this screencast.
     this._elementScreencast = state;
-    void this._captureElementScreencastFrame(state);
+    try {
+      await this._contentPage.send('startElementScreencast', {frameId, objectId, video, width, height, fps, bitrate, codec});
+    } catch (error) {
+      if (this._elementScreencast === state)
+        this._elementScreencast = null;
+      throw error;
+    }
+    if (this._elementScreencast !== state)
+      throw new Error('Screencast was stopped');
+    const capture = state.video ? this._captureElementVideoFrame : this._captureElementPngFrame;
+    void capture.call(this, state);
     return {screencastId: state.id};
   }
 
-  async _captureElementScreencastFrame(state) {
+  // PNG mode is ack-paced and serial: capture, emit, wait for the client ack,
+  // then schedule the next capture relative to when this one started.
+  async _captureElementPngFrame(state) {
     if (this._elementScreencast !== state)
       return;
     const started = Date.now();
-    if (state.video) {
-      state.nextFrameAt += state.interval;
-      state.timer = setTimeout(() => void this._captureElementScreencastFrame(state),
-                               Math.max(0, state.nextFrameAt - Date.now()));
-      // Bound live-video latency and memory. When encoding falls behind, skip
-      // capture requests rather than queueing frames that are already stale.
-      if (state.capturesInFlight >= 8)
-        return;
-      state.capturesInFlight++;
-    }
     try {
-      if (state.video || !state.waitingForAck) {
-        const {data} = await this._contentPage.send('captureElementScreencastFrame', {
-          width: state.width,
-          height: state.height,
-          fps: state.fps,
-          bitrate: state.bitrate,
-          codec: state.codec,
-          frameIndex: state.frameIndex++,
-        });
-        const size = state.video ? {width: state.width, height: state.height} : pngSize(data);
+      if (!state.waitingForAck) {
+        const {data} = await this._contentPage.send('captureElementScreencastFrame', {});
+        const size = pngSize(data);
         if (this._elementScreencast !== state)
           return;
-        state.waitingForAck = !state.video;
-        if (!data)
-          return;
+        state.consecutiveFailures = 0;
+        state.waitingForAck = true;
         this._session.emitEvent('Page.screencastFrame', {
           data,
           deviceWidth: size.width,
@@ -984,14 +1013,62 @@ export class PageHandler {
         });
       }
     } catch (error) {
+      state.consecutiveFailures++;
+      if (this._elementScreencast === state &&
+          (isPermanentCaptureError(error) || state.consecutiveFailures >= kMaxConsecutiveCaptureFailures)) {
+        void this._stopElementScreencast();
+        return;
+      }
+    }
+    if (this._elementScreencast === state)
+      state.timer = setTimeout(() => void this._captureElementPngFrame(state), Math.max(0, state.interval - (Date.now() - started)));
+  }
+
+  // Video mode is pipelined on a fixed cadence: schedule the next tick first
+  // so encode latency never compounds into the frame clock, and skip ticks
+  // while too many captures are in flight rather than queueing stale frames.
+  async _captureElementVideoFrame(state) {
+    if (this._elementScreencast !== state)
+      return;
+    if (Date.now() - state.lastDataAt > kElementVideoStallTimeoutMs) {
+      void this._stopElementScreencast();
+      return;
+    }
+    // Clamp catch-up so a long stall yields one prompt frame, not a burst of
+    // zero-delay ticks until wall-clock parity is restored.
+    state.nextFrameAt = Math.max(state.nextFrameAt + state.interval, Date.now() - state.interval);
+    state.timer = setTimeout(() => void this._captureElementVideoFrame(state),
+                             Math.max(0, state.nextFrameAt - Date.now()));
+    if (state.capturesInFlight >= kMaxElementFramesInFlight)
+      return;
+    state.capturesInFlight++;
+    try {
+      // Wall-clock frame index: PTS is frameIndex / fps, so skipped ticks must
+      // leave PTS gaps rather than compress the encoded timeline.
+      const frameIndex = Math.max(Math.round((Date.now() - state.startedAt) / state.interval),
+                                  state.lastFrameIndex + 1);
+      state.lastFrameIndex = frameIndex;
+      const {data} = await this._contentPage.send('captureElementScreencastFrame', {frameIndex});
       if (this._elementScreencast !== state)
         return;
+      state.consecutiveFailures = 0;
+      if (!data)
+        return;
+      state.lastDataAt = Date.now();
+      this._session.emitEvent('Page.screencastFrame', {
+        data,
+        deviceWidth: state.width,
+        deviceHeight: state.height,
+        timestamp: Date.now() / 1000,
+      });
+    } catch (error) {
+      state.consecutiveFailures++;
+      if (this._elementScreencast === state &&
+          (isPermanentCaptureError(error) || state.consecutiveFailures >= kMaxConsecutiveCaptureFailures))
+        void this._stopElementScreencast();
     } finally {
-      if (state.video)
-        state.capturesInFlight--;
+      state.capturesInFlight--;
     }
-    if (!state.video && this._elementScreencast === state)
-      state.timer = setTimeout(() => void this._captureElementScreencastFrame(state), Math.max(0, state.interval - (Date.now() - started)));
   }
 
   async _stopElementScreencast() {

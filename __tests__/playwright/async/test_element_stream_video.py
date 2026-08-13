@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from playwright.async_api import Page, Playwright
+from rotunda.screencast import normalize_frame_data, start_screencast
 from tests.server import Server
 
 ROOT = Path(__file__).parents[3]
@@ -22,7 +23,7 @@ def load_script(name: str, filename: str):
     return module
 
 
-CORE = load_script("stream_juggler_screencast", "stream-juggler-screencast.py")
+# The low-latency viewer server and packet stream remain script-only helpers.
 VIDEO = load_script("stream_selector_low_latency", "stream-selector-low-latency.py")
 
 
@@ -67,9 +68,9 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         )
 
         def on_frame(frame: dict[str, object]) -> None:
-            packets.update(CORE.normalize_frame_data(frame["data"]))
+            packets.update(normalize_frame_data(frame["data"]))
 
-        await CORE.start_screencast(
+        await start_screencast(
             page,
             on_frame,
             quality=90,
@@ -187,9 +188,9 @@ async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
 
     try:
         def on_frame(frame: dict[str, object]) -> None:
-            packets.update(CORE.normalize_frame_data(frame["data"]))
+            packets.update(normalize_frame_data(frame["data"]))
 
-        await CORE.start_screencast(
+        await start_screencast(
             page,
             on_frame,
             quality=90,

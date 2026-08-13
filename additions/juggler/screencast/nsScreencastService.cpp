@@ -157,6 +157,12 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     return nullptr;
   }
 
+  nsIWidget* NativeVideoTopLevelWidget() {
+    return mNativeVideo && !mNativeFailed && mWidget && !mWidget->Destroyed()
+               ? mWidget->GetTopLevelWidget()
+               : nullptr;
+  }
+
   bool Start() {
     if (mNativeVideo) {
       dom::ElementVideoStream::Options options{
@@ -193,9 +199,13 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
                 nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP,
                 "nsScreencastService::CaptureNativeFrame"_ns));
           },
-          [](const MediaResult& aError) {
+          [self = RefPtr{this}](const MediaResult& aError) {
             fprintf(stderr, "Failed to create native screencast encoder: %s\n",
                     aError.Description().get());
+            // Release the per-window native slot and tell the client frames
+            // will never come instead of squatting until an explicit stop.
+            self->mNativeFailed = true;
+            self->mClient->ScreencastStopped();
           });
       return true;
     }
@@ -231,14 +241,18 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
 #ifdef XP_MACOSX
     // The snapshotter is created and used on the compositor thread; destroy it
     // there too instead of releasing compositor-owned state on the main thread.
+    // If the compositor thread is already gone (late shutdown), destroying on
+    // the main thread is the remaining safe option.
     if (mNativeSnapshotter) {
       UniquePtr<layers::NativeLayerRootSnapshotter> snapshotter =
           std::move(mNativeSnapshotter);
-      MOZ_ALWAYS_SUCCEEDS(
-          layers::CompositorThread()->Dispatch(NS_NewRunnableFunction(
-              __func__, [snapshotter = std::move(snapshotter)]() mutable {
-                snapshotter = nullptr;
-              })));
+      if (layers::CompositorThread()) {
+        MOZ_ALWAYS_SUCCEEDS(
+            layers::CompositorThread()->Dispatch(NS_NewRunnableFunction(
+                __func__, [snapshotter = std::move(snapshotter)]() mutable {
+                  snapshotter = nullptr;
+                })));
+      }
     }
 #endif
     if (mCaptureModule) {
@@ -387,9 +401,24 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
         }));
   }
 
+  // Wall-clock frame indices: PTS is frameIndex / fps, so deriving the index
+  // from elapsed time makes skipped ticks produce real PTS gaps instead of
+  // silently compressing the recorded timeline relative to wall clock.
+  uint64_t NextFrameIndex() {
+    MOZ_ASSERT(NS_IsMainThread());
+    const TimeStamp now = TimeStamp::Now();
+    if (mCaptureStart.IsNull())
+      mCaptureStart = now;
+    const double elapsedFrames = (now - mCaptureStart).ToSeconds() * mFPS;
+    const uint64_t frameIndex = std::max(
+        static_cast<uint64_t>(elapsedFrames + 0.5), mNextFrameIndexFloor);
+    mNextFrameIndexFloor = frameIndex + 1;
+    return frameIndex;
+  }
+
   void CaptureNativeFrame() {
     MOZ_ASSERT(NS_IsMainThread());
-    if (mStopped || !mNativeReady || !mNativeStream ||
+    if (mStopped || !mNativeReady || !mNativeStream || mWidget->Destroyed() ||
         mFramesInFlight.load() >= kMaxNativeFramesInFlight)
       return;
 
@@ -422,11 +451,16 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
           sourceOrigin = widgetBounds.TopLeft() - rootBounds.TopLeft();
         }
       }
+      if (!layers::CompositorThread())
+        return;
       mFramesInFlight.fetch_add(1);
-      const uint64_t frameIndex = mFrameIndex.fetch_add(1);
+      const uint64_t frameIndex = NextFrameIndex();
       const double timestamp = ScreencastTimestampSeconds();
       const gfx::IntRect sourceRect(sourceOrigin,
                                     gfx::IntSize(pageWidth, pageHeight));
+      // Raw pointer is safe: this runnable and Stop()'s destroy runnable are
+      // both dispatched from the main thread to the compositor thread, so FIFO
+      // ordering guarantees every capture runs before destruction.
       layers::NativeLayerRootSnapshotter* snapshotter =
           mNativeSnapshotter.get();
       RefPtr<Session> self{this};
@@ -500,7 +534,7 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     }
 
     mFramesInFlight.fetch_add(1);
-    const uint64_t frameIndex = mFrameIndex.fetch_add(1);
+    const uint64_t frameIndex = NextFrameIndex();
     const double timestamp = ScreencastTimestampSeconds();
     SubmitNativeFrame(
         mNativeStream->EncodeSurface(std::move(surface), frameIndex), pageWidth,
@@ -533,7 +567,9 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
 
  private:
   RefPtr<nsIScreencastServiceClient> mClient;
-  nsIWidget* mWidget;
+  // Strong reference: the native timer dereferences the widget on every tick,
+  // and nothing else guarantees the widget outlives an unstopped session.
+  nsCOMPtr<nsIWidget> mWidget;
   webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> mCaptureModule;
   std::unique_ptr<ScreencastEncoder> mEncoder;
   uint32_t mJpegQuality;
@@ -550,7 +586,9 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
   bool mH265;
   uint32_t mContentOffsetTop;
   std::atomic<bool> mNativeReady = false;
-  std::atomic<uint64_t> mFrameIndex = 0;
+  std::atomic<bool> mNativeFailed = false;
+  TimeStamp mCaptureStart;
+  uint64_t mNextFrameIndexFloor = 0;
   nsCOMPtr<nsITimer> mNativeTimer;
   RefPtr<dom::ElementVideoStream> mNativeStream;
 #ifdef XP_MACOSX
@@ -596,6 +634,17 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
       capturer = CreateWindowCapturer(widget);
     if (!capturer)
       return NS_ERROR_FAILURE;
+  } else if (nsIWidget* topLevel = widget->GetTopLevelWidget()) {
+    // A NativeLayerRoot supports exactly one snapshotter (CreateSnapshotter
+    // release-asserts otherwise), so a second native session on the same OS
+    // window must be rejected here instead of crashing the browser.
+    for (auto& it : mIdToSession) {
+      if (it.second->NativeVideoTopLevelWidget() == topLevel) {
+        fprintf(stderr,
+                "A native screencast is already running for this window\n");
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+    }
   }
 
   gfx::IntMargin margin;

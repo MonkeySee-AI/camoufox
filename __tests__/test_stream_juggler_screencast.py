@@ -5,7 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
+from rotunda.screencast import image_size, start_screencast
 
+# The CLI wiring (mode defaults, HLS/MJPEG serving) stays script-only, so the
+# script module is still bootstrapped for those tests.
 SCRIPT = Path(__file__).parents[1] / "scripts" / "stream-juggler-screencast.py"
 SPEC = importlib.util.spec_from_file_location("stream_juggler_screencast", SCRIPT)
 assert SPEC and SPEC.loader
@@ -19,7 +22,7 @@ def test_image_size_reads_png_dimensions() -> None:
         123
     ).to_bytes(4, "big")
 
-    assert STREAM.image_size(header) == {"width": 321, "height": 123}
+    assert image_size(header) == {"width": 321, "height": 123}
 
 
 class RecordingChannel:
@@ -45,7 +48,7 @@ async def test_element_video_serializes_native_stream_options() -> None:
     page = SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
     on_frame = object()
 
-    await STREAM.start_screencast(
+    await start_screencast(
         page,
         on_frame,
         91,
@@ -88,7 +91,7 @@ async def test_viewport_video_serializes_without_a_selector() -> None:
     )
     page = SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
 
-    await STREAM.start_screencast(
+    await start_screencast(
         page,
         object(),
         90,

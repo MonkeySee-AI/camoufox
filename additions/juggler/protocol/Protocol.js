@@ -987,7 +987,7 @@ const Page = {
       params: {
         width: t.Optional(t.Number),
         height: t.Optional(t.Number),
-        quality: t.Number,
+        quality: t.Optional(t.Number),
         frameId: t.Optional(t.String),
         objectId: t.Optional(t.String),
         fps: t.Optional(t.Number),
