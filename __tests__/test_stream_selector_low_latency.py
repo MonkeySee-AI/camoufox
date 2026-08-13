@@ -29,13 +29,17 @@ def test_native_packet_stream_preserves_encoded_order() -> None:
 def native_packet(*frames: bytes) -> bytes:
     packet = bytearray()
     for index, frame in enumerate(frames):
-        packet.extend(b"RSE1")
+        packet.extend(b"RSE2")
         packet.append(index == 0)
         packet.extend(len(frame).to_bytes(4, "big"))
         packet.extend((index * 16_666).to_bytes(8, "big"))
         packet.extend((16_666).to_bytes(4, "big"))
         packet.extend((1280).to_bytes(4, "big"))
         packet.extend((720).to_bytes(4, "big"))
+        packet.extend((480).to_bytes(4, "big"))
+        packet.extend((270).to_bytes(4, "big"))
+        packet.extend((320).to_bytes(4, "big"))
+        packet.extend((180).to_bytes(4, "big"))
         packet.extend(frame)
     return bytes(packet)
 
@@ -73,9 +77,10 @@ def test_h265_uses_hevc_annex_b_and_4k60_webcodecs_codec() -> None:
 
 
 def test_viewer_presents_4k_at_the_encoder_logical_size() -> None:
-    # A 4K backing canvas is 2x the 1920x1080 logical canvas, so its element
-    # pixels retain the same CSS size instead of stretching with the window.
+    # The decoder crops each 4K frame to its per-frame content rectangle, so
+    # the popover shrink-wraps the element while preserving logical CSS size.
     html = STREAM.viewer_html("hvc1.1.6.L156.B0").decode()
 
     assert "rasterScale=Math.min(2,Math.max(1,width/1280,height/720))" in html
-    assert "canvas.style.width=`${width/rasterScale}px`" in html
+    assert "canvas.style.width=`${crop.width/crop.rasterScale}px`" in html
+    assert "context.drawImage(frame,crop.x,crop.y,crop.width,crop.height" in html

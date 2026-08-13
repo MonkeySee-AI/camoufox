@@ -52,7 +52,16 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
               }
             </style>
             <div id="target">frame <span>0</span></div>
-            <script>setInterval(() => document.querySelector('span').textContent++, 30)</script>
+            <script>
+              setInterval(() => document.querySelector('span').textContent++, 30);
+              let large = false;
+              setInterval(() => {
+                large = !large;
+                const target = document.querySelector('#target');
+                target.style.width = (large ? 200 : 160) + 'px';
+                target.style.height = (large ? 110 : 90) + 'px';
+              }, 250);
+            </script>
             """
         )
 
@@ -71,23 +80,46 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         )
         host, port = server.server_address[:2]
         await viewer.goto(f"http://{host}:{port}/")
+        await viewer.evaluate(
+            """() => {
+              window.__observedContentSizes = [];
+              new ResizeObserver(([entry]) => {
+                const {width, height} = entry.contentRect;
+                window.__observedContentSizes.push([width, height]);
+              }).observe(document.querySelector('canvas'));
+            }"""
+        )
         supported = await viewer.evaluate(
             f"VideoDecoder.isConfigSupported({{codec: '{codec}'}}).then(r => r.supported)"
         )
         if not supported:
             pytest.skip(f"browser does not support {codec} through WebCodecs")
 
-        # Decoded frames and the fixed dimensions prove actual video playback;
-        # neither a mocked encoder nor a successfully loaded HTML shell can pass.
-        await viewer.wait_for_function(
-            """() => window.__decodedFrames >= 10 &&
-                     window.__streamWidth === 320 &&
-                     window.__streamHeight === 180""",
-            timeout=15_000,
-        )
+        # Decoded frames, fixed stream dimensions, and two observed canvas sizes
+        # prove that real crop metadata shrink-wraps the changing DOM element.
+        try:
+            await viewer.wait_for_function(
+                """() => window.__decodedFrames >= 10 &&
+                         window.__streamWidth === 320 &&
+                         window.__streamHeight === 180 &&
+                         window.__observedContentSizes.some(([w, h]) => Math.abs(w-160) <= 1 && Math.abs(h-90) <= 1) &&
+                         window.__observedContentSizes.some(([w, h]) => Math.abs(w-200) <= 1 && Math.abs(h-110) <= 1)""",
+                timeout=15_000,
+            )
+        except Exception as error:
+            state = await viewer.evaluate(
+                """() => ({
+                  decoded: window.__decodedFrames,
+                  error: window.__decoderError,
+                  stream: [window.__streamWidth, window.__streamHeight],
+                  content: [window.__contentWidth, window.__contentHeight],
+                  observed: window.__observedContentSizes,
+                })"""
+            )
+            raise AssertionError(f"selector crop did not resize: {state}") from error
 
-        # With a one-to-one client canvas, the native 160x90 element must stay
-        # 160x90 instead of being enlarged to fill the 320x180 video frame.
+        # The current crop contains element pixels rather than an empty canvas;
+        # its geometry must be one of the two source sizes, not the video size.
         screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
         blue = [
             (x, y)
@@ -99,8 +131,9 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         ]
         left, top = map(min, zip(*blue))
         right, bottom = map(max, zip(*blue))
-        assert 150 <= right - left + 1 <= 170
-        assert 82 <= bottom - top + 1 <= 98
+        painted_size = (right - left + 1, bottom - top + 1)
+        assert 100 <= painted_size[0] <= 220, painted_size
+        assert 50 <= painted_size[1] <= 130, painted_size
     finally:
         with contextlib.suppress(Exception):
             await page.screencast.stop()

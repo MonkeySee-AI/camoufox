@@ -84,10 +84,10 @@ def parse_native_frames(packet: bytes) -> list[bytes]:
     frames = []
     offset = 0
     while offset < len(packet):
-        if len(packet) - offset < 29 or packet[offset : offset + 4] != b"RSE1":
+        if len(packet) - offset < 45 or packet[offset : offset + 4] != b"RSE2":
             raise ValueError("invalid native selector video packet")
         size = int.from_bytes(packet[offset + 5 : offset + 9], "big")
-        offset += 29
+        offset += 45
         if size > len(packet) - offset:
             raise ValueError("truncated native selector video frame")
         frames.append(packet[offset : offset + size])
@@ -100,15 +100,18 @@ def viewer_html(codec: str) -> bytes:
 <meta charset=utf-8><title>Rotunda low-latency selector stream</title>
 <style>
 html,body{{margin:0;height:100%;background:#080b12;color:white;font:14px system-ui}}
-body{{display:grid;place-items:center;overflow:hidden}}canvas{{max-width:none;max-height:none}}
+body{{display:grid;place-items:center;overflow:hidden}}
+#popover{{display:grid;place-items:center;width:fit-content;height:fit-content}}
+canvas{{display:block;max-width:none;max-height:none}}
 #stats{{position:fixed;top:12px;left:12px;padding:7px 10px;border-radius:7px;background:#000a}}
 </style>
-<canvas></canvas><div id=stats>connecting…</div>
+<div id=popover><canvas width=0 height=0></canvas></div><div id=stats>connecting…</div>
 <script>
 const canvas=document.querySelector('canvas'), stats=document.querySelector('#stats');
 const context=canvas.getContext('2d',{{alpha:false,desynchronized:true}});
 window.__decodedFrames=0;window.__presentedFrames=0;window.__presentedFps=0;
 window.__decoderError='';window.__streamWidth=0;window.__streamHeight=0;
+window.__contentWidth=0;window.__contentHeight=0;
 const frames=[];let playing=false,measuredFrames=0,measuredAt=performance.now();
 const present=()=>{{
   const now=performance.now();
@@ -118,8 +121,16 @@ const present=()=>{{
   }}
   if(frames.length&&(playing||frames.length>=3)){{
     playing=true;
-    const frame=frames.shift();
-    context.drawImage(frame,0,0,canvas.width,canvas.height);frame.close();
+    const {{frame,crop}}=frames.shift();
+    if(canvas.width!==crop.width||canvas.height!==crop.height){{
+      canvas.width=crop.width;canvas.height=crop.height;
+      canvas.style.width=`${{crop.width/crop.rasterScale}}px`;
+      canvas.style.height=`${{crop.height/crop.rasterScale}}px`;
+      window.__contentWidth=crop.width/crop.rasterScale;
+      window.__contentHeight=crop.height/crop.rasterScale;
+    }}
+    context.drawImage(frame,crop.x,crop.y,crop.width,crop.height,
+                      0,0,canvas.width,canvas.height);frame.close();
     window.__presentedFrames++;
   }}
   requestAnimationFrame(present);
@@ -130,11 +141,14 @@ requestAnimationFrame(present);
     codec:'{codec}',hardwareAcceleration:'prefer-hardware',optimizeForLatency:true
   }});
   if(!support.supported)throw new Error('WebCodecs does not support {codec}');
+  const crops=new Map();
   const decoder=new VideoDecoder({{
     output:frame=>{{
       window.__decodedFrames++;
-      frames.push(frame);
-      while(frames.length>8)frames.shift().close();
+      const crop=crops.get(frame.timestamp);crops.delete(frame.timestamp);
+      if(!crop){{frame.close();return;}}
+      frames.push({{frame,crop}});
+      while(frames.length>8)frames.shift().frame.close();
     }},
     error:error=>window.__decoderError=String(error),
   }});
@@ -145,27 +159,30 @@ requestAnimationFrame(present);
     const {{value,done}}=await reader.read();if(done)break;
     const joined=new Uint8Array(pending.length+value.length);
     joined.set(pending);joined.set(value,pending.length);pending=joined;
-    while(pending.length>=29){{
-      if(String.fromCharCode(...pending.subarray(0,4))!=='RSE1')
+    while(pending.length>=45){{
+      if(String.fromCharCode(...pending.subarray(0,4))!=='RSE2')
         throw new Error('invalid native video packet');
       const view=new DataView(pending.buffer,pending.byteOffset);
-      const key=!!pending[4], size=view.getUint32(5), packetSize=29+size;
+      const key=!!pending[4], size=view.getUint32(5), packetSize=45+size;
       if(pending.length<packetSize)break;
       const timestamp=Number(view.getBigUint64(9));
       const duration=view.getUint32(17);
       const width=view.getUint32(21),height=view.getUint32(25);
+      const rasterScale=Math.min(2,Math.max(1,width/1280,height/720));
+      const crop={{x:view.getUint32(29),y:view.getUint32(33),
+                  width:view.getUint32(37),height:view.getUint32(41),rasterScale}};
+      if(!crop.width||!crop.height||crop.x+crop.width>width||crop.y+crop.height>height)
+        throw new Error('invalid native video content rectangle');
       if(!window.__streamWidth){{
-        canvas.width=width;canvas.height=height;
-        const rasterScale=Math.min(2,Math.max(1,width/1280,height/720));
-        canvas.style.width=`${{width/rasterScale}}px`;
-        canvas.style.height=`${{height/rasterScale}}px`;
         window.__streamWidth=width;window.__streamHeight=height;
       }}
       if(started||key){{
         started=true;
+        crops.set(timestamp,crop);
+        if(crops.size>120)crops.delete(crops.keys().next().value);
         decoder.decode(new EncodedVideoChunk({{
           type:key?'key':'delta',timestamp,duration,
-          data:pending.slice(29,packetSize)
+          data:pending.slice(45,packetSize)
         }}));
       }}
       pending=pending.slice(packetSize);
@@ -173,7 +190,7 @@ requestAnimationFrame(present);
   }}
 }})().catch(error=>window.__decoderError=String(error));
 setInterval(()=>{{
-  stats.textContent=`${{window.__presentedFps.toFixed(1)}} fps · ${{window.__decodedFrames}} decoded · ${{canvas.width}}×${{canvas.height}}`;
+  stats.textContent=`${{window.__presentedFps.toFixed(1)}} fps · ${{window.__decodedFrames}} decoded · ${{window.__contentWidth.toFixed(0)}}×${{window.__contentHeight.toFixed(0)}} content · ${{window.__streamWidth}}×${{window.__streamHeight}} stream`;
 }},250);
 </script>""".encode()
 

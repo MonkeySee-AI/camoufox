@@ -43,8 +43,9 @@ void AppendUint64(nsCString& aPacket, uint64_t aValue) {
 }
 
 void AppendEncodedFrame(nsCString& aPacket, const MediaRawData& aFrame,
-                        const gfx::IntSize& aSize) {
-  aPacket.Append("RSE1", 4);
+                        const gfx::IntSize& aSize,
+                        const gfx::IntRect& aContentRect) {
+  aPacket.Append("RSE2", 4);
   aPacket.Append(aFrame.mKeyframe ? '\x01' : '\x00');
   AppendUint32(aPacket, AssertedCast<uint32_t>(aFrame.Size()));
   AppendUint64(aPacket,
@@ -54,12 +55,16 @@ void AppendEncodedFrame(nsCString& aPacket, const MediaRawData& aFrame,
       AssertedCast<uint32_t>(aFrame.mDuration.ToMicroseconds()));
   AppendUint32(aPacket, AssertedCast<uint32_t>(aSize.width));
   AppendUint32(aPacket, AssertedCast<uint32_t>(aSize.height));
+  AppendUint32(aPacket, AssertedCast<uint32_t>(aContentRect.x));
+  AppendUint32(aPacket, AssertedCast<uint32_t>(aContentRect.y));
+  AppendUint32(aPacket, AssertedCast<uint32_t>(aContentRect.width));
+  AppendUint32(aPacket, AssertedCast<uint32_t>(aContentRect.height));
   aPacket.Append(reinterpret_cast<const char*>(aFrame.Data()), aFrame.Size());
 }
 
 Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
-    const gfx::IntSize& aOutputSize
+    const gfx::IntSize& aOutputSize, gfx::IntRect& aContentRect
 #ifdef XP_MACOSX
     ,
     RefPtr<MacIOSurface>& aIOSurface
@@ -82,12 +87,16 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   const double scale = fitScale * pixelScale;
   const gfx::Size fitted(root->mSize.width * scale,
                          root->mSize.height * scale);
+  const gfx::IntSize contentSize(
+      std::max(2, static_cast<int32_t>(std::ceil(fitted.width))),
+      std::max(2, static_cast<int32_t>(std::ceil(fitted.height))));
+  aContentRect = gfx::IntRect((aOutputSize.width - contentSize.width) / 2,
+                              (aOutputSize.height - contentSize.height) / 2,
+                              contentSize.width, contentSize.height);
 
   RefPtr<gfx::DrawTarget> outputTarget;
 #ifdef XP_MACOSX
-  const gfx::IntSize renderSize(
-      std::max(2, static_cast<int32_t>(std::ceil(fitted.width))),
-      std::max(2, static_cast<int32_t>(std::ceil(fitted.height))));
+  const gfx::IntSize& renderSize = contentSize;
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
       renderSize.width, renderSize.height, false);
   if (!staging || !staging->Lock(false)) {
@@ -229,11 +238,12 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   MOZ_ASSERT(!mShutdown);
   mEncoding = !mPipelined;
   const gfx::IntSize size(mOptions.mWidth, mOptions.mHeight);
+  gfx::IntRect contentRect;
 #ifdef XP_MACOSX
   RefPtr<MacIOSurface> frameSurface;
   RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
 #endif
-  auto image = RenderFrame(std::move(aEncode.mFragments), size
+  auto image = RenderFrame(std::move(aEncode.mFragments), size, contentRect
 #ifdef XP_MACOSX
                            ,
                            surface
@@ -260,11 +270,11 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
       : mEncoder->Encode(nsTArray<RefPtr<MediaData>>{frame});
   encode->Then(
       GetCurrentSerialEventTarget(), __func__,
-      [self = RefPtr{this}, size, promise = aEncode.mPromise](
+      [self = RefPtr{this}, size, contentRect, promise = aEncode.mPromise](
           MediaDataEncoder::EncodedData&& aFrames) {
         nsCString packet;
         for (const RefPtr<MediaRawData>& encoded : aFrames) {
-          AppendEncodedFrame(packet, *encoded, size);
+          AppendEncodedFrame(packet, *encoded, size, contentRect);
         }
         promise->Resolve(std::move(packet), __func__);
         if (!self->mPipelined) {

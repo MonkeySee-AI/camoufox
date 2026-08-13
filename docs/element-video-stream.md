@@ -29,9 +29,11 @@ and HEVC for 4K. A real Chrome measurement on the resizing demo sustained
 58.9 native, decoded, and presented frames/s at 3840×2160 with no decoder
 errors.
 
-The binary callback may contain multiple frames. Each is:
+The binary callback may contain multiple frames. `RSE2` carries the centered
+content rectangle for that exact encoded frame, letting clients keep a fixed
+decoder while a canvas or popover shrink-wraps the resizing element. Each is:
 
-`RSE1 | flags:u8 | size:u32be | pts_us:u64be | duration_us:u32be | width:u32be | height:u32be | Annex-B bytes`
+`RSE2 | flags:u8 | size:u32be | pts_us:u64be | duration_us:u32be | width:u32be | height:u32be | crop_x:u32be | crop_y:u32be | crop_width:u32be | crop_height:u32be | Annex-B bytes`
 
 Run the real browser integration and local benchmark with:
 
