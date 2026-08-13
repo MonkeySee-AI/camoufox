@@ -69,11 +69,46 @@ async def test_element_video_serializes_native_stream_options() -> None:
                 "fps": 37,
                 "video": True,
                 "bitrate": 8_000_000,
+                "codec": "h264",
             },
         )
     ]
     assert screencast._started is True
     assert screencast._on_frame is on_frame
+
+
+async def test_viewport_video_serializes_without_a_selector() -> None:
+    # A selector-less video request must retain the native timing and encoder
+    # options instead of falling back to Playwright's legacy JPEG screencast.
+    channel = RecordingChannel()
+    screencast = SimpleNamespace(
+        _started=False,
+        _on_frame=None,
+        _page=SimpleNamespace(_channel=channel),
+    )
+    page = SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
+
+    await STREAM.start_screencast(
+        page,
+        object(),
+        90,
+        {"width": 3840, "height": 2160},
+        fps=60,
+        video=True,
+        bitrate=35_000_000,
+        codec="h265",
+    )
+
+    assert channel.calls[0][2] == {
+        "quality": 90,
+        "sendFrames": True,
+        "record": False,
+        "size": {"width": 3840, "height": 2160},
+        "fps": 60,
+        "video": True,
+        "bitrate": 35_000_000,
+        "codec": "h265",
+    }
 
 
 def test_selector_defaults_to_mjpeg_and_rejects_hls(monkeypatch) -> None:

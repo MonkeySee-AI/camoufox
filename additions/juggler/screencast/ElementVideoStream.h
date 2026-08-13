@@ -29,6 +29,7 @@ class ElementVideoStream final {
     uint32_t mFramesPerSecond;
     uint32_t mBitsPerSecond;
     bool mH265;
+    bool mFillOutput;
 
     bool operator==(const Options& aOther) const = default;
   };

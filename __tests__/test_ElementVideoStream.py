@@ -19,10 +19,12 @@ def test_shared_stream_keeps_platform_encoders_behind_gecko_contract() -> None:
     assert "Media Foundation" not in source
     assert "mPendingEncode" in source
     assert "mPendingEncode->mPromise->Resolve(nsCString()" in source
+    assert "mOptions.mFillOutput" in source
     assert "CreateBiPlanarSurface" in source
     assert "YUV420SP_NV12" in source
     assert "startTaskToRender" in STREAM_MAC.read_text()
     assert "imageByCompositingOverImage" in STREAM_MAC.read_text()
+    assert "aDestinationRect.width / sourceSize.width" in STREAM_MAC.read_text()
 
 
 def test_build_contract_includes_shared_media_encoder_headers() -> None:
@@ -41,5 +43,7 @@ def test_macos_patch_keeps_iosurface_to_videotoolbox_handoff() -> None:
     # when the private AppleVTEncoder surface seam changes upstream.
     source = NATIVE_PATCH.read_text()
 
+    assert "Element? element" in source
+    assert "bool aFillOutput" in source
     assert "CVPixelBufferCreateWithIOSurface" in source
     assert "AsMacIOSurfaceImage" in source

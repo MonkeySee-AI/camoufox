@@ -882,7 +882,7 @@ export class PageHandler {
   }
 
   async ['Page.startScreencast'](options) {
-    if (options.objectId || options.frameId)
+    if (options.objectId || options.frameId || options.video)
       return await this._startElementScreencast(options);
     return await this._pageTarget.startScreencast(options);
   }
@@ -906,18 +906,20 @@ export class PageHandler {
   async _startElementScreencast({frameId, objectId, fps = 25, video = false,
                                  width = 1280, height = 720, bitrate = 12000000,
                                  codec = 'h264'}) {
-    if (!frameId || !objectId)
-      throw new Error('Element screencast requires frameId and objectId');
+    if (!!frameId !== !!objectId)
+      throw new Error('Element screencast requires both frameId and objectId');
+    if (!frameId && !video)
+      throw new Error('Viewport native screencast requires video mode');
     if (this._elementScreencast)
       throw new Error('Screencast is already running');
     if (fps < 1 || fps > 60)
       throw new Error('Element screencast FPS must be between 1 and 60');
     if (video && (width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2))
-      throw new Error('Element video dimensions must be even and between 2 and 8192');
+      throw new Error('Native video dimensions must be even and between 2 and 8192');
     if (video && (bitrate < 1000 || bitrate > 500000000))
-      throw new Error('Element video bitrate must be between 1000 and 500000000');
+      throw new Error('Native video bitrate must be between 1000 and 500000000');
     if (video && codec !== 'h264' && codec !== 'h265')
-      throw new Error('Element video codec must be h264 or h265');
+      throw new Error('Native video codec must be h264 or h265');
 
     await this._contentPage.send('startElementScreencast', {frameId, objectId, video});
     const state = {

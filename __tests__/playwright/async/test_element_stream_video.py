@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from playwright.async_api import Page, Playwright
+from tests.server import Server
 
 ROOT = Path(__file__).parents[3]
 
@@ -140,5 +141,108 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         packets.close()
         server.shutdown()
         server.server_close()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(chrome.close(), timeout=5)
+
+
+async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
+    page: Page, playwright: Playwright, server: Server
+) -> None:
+    # This selector-less request must paint only the visible viewport, resolve
+    # a remote iframe, upscale it natively, and arrive as decodable video.
+    server.set_route(
+        "/viewport-video-child.html",
+        lambda request: (
+            request.write(b"<style>html,body{margin:0;height:100%;background:rgb(0,220,70)}</style>"),
+            request.finish(),
+        ),
+    )
+    parent = f"""
+      <style>
+        html, body {{ margin: 0; height: 500px; background: rgb(15, 30, 180) }}
+        iframe {{ position: absolute; left: 80px; top: 40px; width: 120px; height: 80px; border: 0 }}
+        #offscreen {{ position: absolute; top: 300px; width: 100px; height: 100px; background: yellow }}
+      </style>
+      <iframe src="{server.CROSS_PROCESS_PREFIX}/viewport-video-child.html"></iframe>
+      <div id="offscreen"></div>
+    """.encode()
+    server.set_route(
+        "/viewport-video-parent.html",
+        lambda request: (request.write(parent), request.finish()),
+    )
+    await page.set_viewport_size({"width": 320, "height": 180})
+    await page.goto(server.PREFIX + "/viewport-video-parent.html")
+    await page.frames[1].wait_for_load_state()
+
+    packets = VIDEO.NativePacketStream()
+    _, codec = VIDEO.h264_level(640, 360)
+    stream_server = VIDEO.start_viewer_server("127.0.0.1", 0, packets, codec)
+    try:
+        chrome = await playwright.chromium.launch(channel="chrome", headless=True)
+    except Exception as error:
+        stream_server.shutdown()
+        stream_server.server_close()
+        pytest.skip(f"Chrome is unavailable for H.264 POC verification: {error}")
+    viewer = await chrome.new_page(viewport={"width": 640, "height": 360})
+
+    try:
+        def on_frame(frame: dict[str, object]) -> None:
+            packets.update(CORE.normalize_frame_data(frame["data"]))
+
+        await CORE.start_screencast(
+            page,
+            on_frame,
+            quality=90,
+            size={"width": 640, "height": 360},
+            fps=30,
+            video=True,
+            bitrate=3_000_000,
+        )
+        host, port = stream_server.server_address[:2]
+        await viewer.goto(f"http://{host}:{port}/")
+
+        # Full crop geometry proves the 320x180 viewport was replayed at 2x
+        # rather than centered at its source dimensions like an element.
+        try:
+            await viewer.wait_for_function(
+                """() => window.__decodedFrames >= 10 &&
+                         window.__streamWidth === 640 &&
+                         window.__streamHeight === 360 &&
+                         window.__contentWidth === 640 &&
+                         window.__contentHeight === 360""",
+                timeout=15_000,
+            )
+        except Exception as error:
+            state = await viewer.evaluate(
+                """() => ({
+                  decoded: window.__decodedFrames,
+                  error: window.__decoderError,
+                  stream: [window.__streamWidth, window.__streamHeight],
+                  content: [window.__contentWidth, window.__contentHeight],
+                })"""
+            )
+            state["source"] = await page.evaluate(
+                """() => ({
+                  inner: [innerWidth, innerHeight],
+                  client: [document.documentElement.clientWidth,
+                           document.documentElement.clientHeight],
+                })"""
+            )
+            raise AssertionError(f"viewport video did not fill output: {state}") from error
+        screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
+
+        # Parent blue and remote-frame green must both survive the native
+        # cross-process paint; the offscreen yellow block must not appear.
+        blue = screenshot.getpixel((500, 300))
+        green = screenshot.getpixel((240, 160))
+        assert blue[2] > 120 and blue[0] < 70 and blue[1] < 80, blue
+        assert green[1] > 180 and green[1] - max(green[0], green[2]) > 100, green
+        assert screenshot.getpixel((50, 300))[2] > 120
+    finally:
+        with contextlib.suppress(Exception):
+            await page.screencast.stop()
+        packets.close()
+        stream_server.shutdown()
+        stream_server.server_close()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(chrome.close(), timeout=5)

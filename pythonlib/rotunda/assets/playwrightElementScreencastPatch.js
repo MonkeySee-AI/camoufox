@@ -32,17 +32,17 @@ function patchPageDispatcher(dispatcherModule) {
 
   const original = PageDispatcher.prototype.screencastStart;
   PageDispatcher.prototype.screencastStart = async function(params, progress) {
-    if (!params.selector)
+    if (!params.selector && !params.video)
       return await original.call(this, params, progress);
     if (!params.sendFrames || params.record)
-      throw new Error("Element screencast only supports live frame streaming");
+      throw new Error("Native video screencast only supports live frame streaming");
     if (this._screencastClient || this._videoRecorder || this._page.screencast._clients.size)
       throw new Error("Screencast is already running");
 
-    const element = await progress.race(
+    const element = params.selector ? await progress.race(
       this._page.mainFrame().querySelector(params.selector, {strict: false}),
-    );
-    if (!element)
+    ) : null;
+    if (params.selector && !element)
       throw new Error(`Element screencast selector did not match: ${params.selector}`);
 
     const session = this._page.delegate && this._page.delegate._session;
@@ -57,7 +57,7 @@ function patchPageDispatcher(dispatcherModule) {
     this._screencastClient = client;
     this._page.screencast._clients.add(client);
     try {
-      await session.send("Page.startScreencast", {
+      const options = {
         quality: params.quality ?? 90,
         fps: params.fps ?? 25,
         video: params.video ?? false,
@@ -65,15 +65,18 @@ function patchPageDispatcher(dispatcherModule) {
         codec: params.codec ?? "h264",
         width: params.size?.width,
         height: params.size?.height,
-        frameId: element._context.frame._id,
-        objectId: element._objectId,
-      });
+      };
+      if (element) {
+        options.frameId = element._context.frame._id;
+        options.objectId = element._objectId;
+      }
+      await session.send("Page.startScreencast", options);
     } catch (error) {
       this._screencastClient = undefined;
       this._page.screencast.removeClient(client);
       throw error;
     } finally {
-      element.dispose();
+      element?.dispose();
     }
     return {};
   };

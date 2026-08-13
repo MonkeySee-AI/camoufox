@@ -15,5 +15,12 @@ const validated = validator(
 );
 if (validated.selector !== "#target" || validated.fps !== 37)
   throw new Error("element screencast validator dropped selector parameters");
+const viewportVideo = validator(
+  {quality: 90, sendFrames: true, record: false, video: true, fps: 60},
+  "",
+  {binary: "fromBase64", isUnderTest: () => false, tChannelImpl: () => null},
+);
+if (!viewportVideo.video || viewportVideo.fps !== 60)
+  throw new Error("viewport video validator dropped native stream parameters");
 if (!String(PageDispatcher.prototype.screencastStart).includes('session.send("Page.startScreencast"'))
   throw new Error("missing element screencast dispatcher path");

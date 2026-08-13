@@ -422,7 +422,9 @@ async def start_screencast(
         if size:
             params["size"] = size
         if selector:
-            params.update(selector=selector, fps=fps)
+            params["selector"] = selector
+        if selector or video:
+            params["fps"] = fps
         if video:
             params.update(video=True, bitrate=bitrate, codec=codec)
         await screencast._page._channel.send_return_as_dict(

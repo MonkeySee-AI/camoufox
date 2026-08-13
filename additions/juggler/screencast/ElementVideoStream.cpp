@@ -64,7 +64,8 @@ void AppendEncodedFrame(nsCString& aPacket, const MediaRawData& aFrame,
 
 Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     gfx::CrossProcessPaint::ResolvedFragmentMap&& aFragments,
-    const gfx::IntSize& aOutputSize, gfx::IntRect& aContentRect
+    const gfx::IntSize& aOutputSize, bool aFillOutput,
+    gfx::IntRect& aContentRect
 #ifdef XP_MACOSX
     ,
     RefPtr<MacIOSurface>& aIOSurface
@@ -75,28 +76,35 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     return Err(StreamError("Element paint did not produce a root surface"_ns));
   }
 
-  const double canvasScale =
-      std::min({1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
-  const gfx::IntSize logicalSize(
-      std::max(2, static_cast<int32_t>(aOutputSize.width * canvasScale)),
-      std::max(2, static_cast<int32_t>(aOutputSize.height * canvasScale)));
-  const double fitScale =
-      std::min({1.0, static_cast<double>(logicalSize.width) / root->mSize.width,
-                static_cast<double>(logicalSize.height) / root->mSize.height});
-  const double pixelScale = std::min(2.0, 1.0 / canvasScale);
-  const double scale = fitScale * pixelScale;
+  double scale;
+  if (aFillOutput) {
+    scale = std::min(static_cast<double>(aOutputSize.width) / root->mSize.width,
+                     static_cast<double>(aOutputSize.height) / root->mSize.height);
+  } else {
+    const double canvasScale = std::min(
+        {1.0, 1280.0 / aOutputSize.width, 720.0 / aOutputSize.height});
+    const gfx::IntSize logicalSize(
+        std::max(2, static_cast<int32_t>(aOutputSize.width * canvasScale)),
+        std::max(2, static_cast<int32_t>(aOutputSize.height * canvasScale)));
+    const double fitScale = std::min(
+        {1.0, static_cast<double>(logicalSize.width) / root->mSize.width,
+         static_cast<double>(logicalSize.height) / root->mSize.height});
+    scale = fitScale * std::min(2.0, 1.0 / canvasScale);
+  }
   const gfx::Size fitted(root->mSize.width * scale,
                          root->mSize.height * scale);
   const gfx::IntSize contentSize(
-      std::max(2, static_cast<int32_t>(std::ceil(fitted.width))),
-      std::max(2, static_cast<int32_t>(std::ceil(fitted.height))));
+      std::min(aOutputSize.width,
+               std::max(2, static_cast<int32_t>(std::ceil(fitted.width)))),
+      std::min(aOutputSize.height,
+               std::max(2, static_cast<int32_t>(std::ceil(fitted.height)))));
   aContentRect = gfx::IntRect((aOutputSize.width - contentSize.width) / 2,
                               (aOutputSize.height - contentSize.height) / 2,
                               contentSize.width, contentSize.height);
 
   RefPtr<gfx::DrawTarget> outputTarget;
 #ifdef XP_MACOSX
-  const gfx::IntSize& renderSize = contentSize;
+  const gfx::IntSize renderSize = aFillOutput ? root->mSize : contentSize;
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
       renderSize.width, renderSize.height, false);
   if (!staging || !staging->Lock(false)) {
@@ -120,12 +128,15 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
       gfx::ColorPattern(gfx::DeviceColor(1, 1, 1, 1)));
 #ifdef XP_MACOSX
   const gfx::Point offset(0, 0);
+  const double paintScale = aFillOutput ? 1.0 : scale;
 #else
   const gfx::Point offset((renderSize.width - fitted.width) / 2,
                           (renderSize.height - fitted.height) / 2);
+  const double paintScale = scale;
 #endif
-  gfx::Matrix fit = gfx::Matrix::Scaling(scale, scale).PostTranslate(
+  gfx::Matrix fit = gfx::Matrix::Scaling(paintScale, paintScale).PostTranslate(
       offset.x, offset.y);
+  outputTarget->SetTransform(fit);
   gfx::InlineTranslator translator(outputTarget, nullptr);
   translator.SetReferenceDrawTargetTransform(fit);
   translator.SetDependentSurfaces(&aFragments);
@@ -150,7 +161,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
   if (!aIOSurface) {
     return Err(StreamError("Could not allocate the output IOSurface"_ns));
   }
-  if (!CompositeElementVideoSurface(staging, aIOSurface)) {
+  if (!CompositeElementVideoSurface(staging, aIOSurface, aContentRect)) {
     return Err(StreamError("Could not composite the IOSurface video frame"_ns));
   }
   return RefPtr<layers::Image>(new layers::MacIOSurfaceImage(aIOSurface.get()));
@@ -243,7 +254,8 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   RefPtr<MacIOSurface> frameSurface;
   RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
 #endif
-  auto image = RenderFrame(std::move(aEncode.mFragments), size, contentRect
+  auto image = RenderFrame(std::move(aEncode.mFragments), size,
+                           mOptions.mFillOutput, contentRect
 #ifdef XP_MACOSX
                            ,
                            surface

@@ -97,7 +97,7 @@ def parse_native_frames(packet: bytes) -> list[bytes]:
 
 def viewer_html(codec: str) -> bytes:
     return f"""<!doctype html>
-<meta charset=utf-8><title>Rotunda low-latency selector stream</title>
+<meta charset=utf-8><title>Rotunda low-latency native stream</title>
 <style>
 html,body{{margin:0;height:100%;background:white;color:#111;font:14px system-ui}}
 body{{display:grid;place-items:center;overflow:hidden}}
@@ -289,9 +289,10 @@ async def stream(args: argparse.Namespace) -> None:
             try:
                 if args.url:
                     await page.goto(args.url)
-                await page.locator(args.selector).first.wait_for(
-                    state="visible", timeout=15_000
-                )
+                if args.selector:
+                    await page.locator(args.selector).first.wait_for(
+                        state="visible", timeout=15_000
+                    )
                 if args.verify_client:
                     client_browser = await playwright.chromium.launch(
                         channel="chrome", headless=args.headless
@@ -391,10 +392,10 @@ async def stream(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="POC: stream an isolated Rotunda element as low-latency native video."
+        description="POC: stream a Rotunda viewport or selector as low-latency native video."
     )
     parser.add_argument("--url", required=True)
-    parser.add_argument("--selector", required=True)
+    parser.add_argument("--selector")
     parser.add_argument("--executable-path")
     parser.add_argument("--endpoint")
     parser.add_argument("--headless", action="store_true")

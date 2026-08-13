@@ -10,7 +10,8 @@
 namespace mozilla::dom {
 
 bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
-                                  const RefPtr<MacIOSurface>& aDestination) {
+                                  const RefPtr<MacIOSurface>& aDestination,
+                                  const gfx::IntRect& aDestinationRect) {
   @autoreleasepool {
     static CIContext* const context =
         [[CIContext alloc] initWithOptions:@{kCIContextUseSoftwareRenderer : @NO}];
@@ -18,9 +19,11 @@ bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
     const gfx::IntSize destinationSize = aDestination->GetSize();
     CIImage* foreground =
         [CIImage imageWithIOSurface:aSource->GetIOSurfaceRef().get()];
-    foreground = [foreground imageByApplyingTransform:CGAffineTransformMakeTranslation(
-                                 (destinationSize.width - sourceSize.width) / 2,
-                                 (destinationSize.height - sourceSize.height) / 2)];
+    foreground = [foreground imageByApplyingTransform:CGAffineTransformMake(
+                                 (CGFloat)aDestinationRect.width / sourceSize.width,
+                                 0, 0,
+                                 (CGFloat)aDestinationRect.height / sourceSize.height,
+                                 aDestinationRect.x, aDestinationRect.y)];
     CIImage* background =
         [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:1]]
             imageByCroppingToRect:CGRectMake(0, 0, destinationSize.width,

@@ -6,13 +6,15 @@
 #define mozilla_dom_ElementVideoStreamMac_h
 
 #include "mozilla/RefPtr.h"
+#include "mozilla/gfx/Rect.h"
 
 class MacIOSurface;
 
 namespace mozilla::dom {
 
 bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
-                                  const RefPtr<MacIOSurface>& aDestination);
+                                  const RefPtr<MacIOSurface>& aDestination,
+                                  const gfx::IntRect& aDestinationRect);
 
 }  // namespace mozilla::dom
 
