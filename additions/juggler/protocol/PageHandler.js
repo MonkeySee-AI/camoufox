@@ -26,6 +26,18 @@ function isHumanizeEnabled() {
   return ChromeUtils.rotundaGetBool('humanize.enabled', false);
 }
 
+function pngSize(data) {
+  const header = atob(data.slice(0, 32));
+  if (header.length < 24 || header.slice(1, 4) !== 'PNG')
+    throw new Error('Native element snapshot did not return PNG data');
+  const readUint32 = offset =>
+    ((header.charCodeAt(offset) << 24) >>> 0) +
+    (header.charCodeAt(offset + 1) << 16) +
+    (header.charCodeAt(offset + 2) << 8) +
+    header.charCodeAt(offset + 3);
+  return {width: readUint32(16), height: readUint32(20)};
+}
+
 function humanizedMousePlan(fromX, fromY, toX, toY, bounds, clickAtEnd = false) {
   if (!isHumanizeEnabled() || fromX === toX && fromY === toY)
     return null;
@@ -891,7 +903,7 @@ export class PageHandler {
     await this._pageTarget.stopScreencast(options);
   }
 
-  async _startElementScreencast({frameId, objectId, quality = 90, fps = 25}) {
+  async _startElementScreencast({frameId, objectId, fps = 25}) {
     if (!frameId || !objectId)
       throw new Error('Element screencast requires frameId and objectId');
     if (this._elementScreencast)
@@ -903,7 +915,6 @@ export class PageHandler {
     const state = {
       id: helper.generateId(),
       interval: 1000 / fps,
-      quality,
       timer: null,
       waitingForAck: false,
     };
@@ -916,20 +927,15 @@ export class PageHandler {
     const started = Date.now();
     try {
       if (!state.waitingForAck) {
-        const rect = await this._contentPage.send('getElementScreencastBoundingBox');
-        const {data} = await this['Page.screenshot']({
-          mimeType: 'image/jpeg',
-          clip: rect,
-          omitDeviceScaleFactor: true,
-          quality: state.quality,
-        });
+        const {data} = await this._contentPage.send('captureElementScreencastFrame');
+        const size = pngSize(data);
         if (this._elementScreencast !== state)
           return;
         state.waitingForAck = true;
         this._session.emitEvent('Page.screencastFrame', {
           data,
-          deviceWidth: rect.width,
-          deviceHeight: rect.height,
+          deviceWidth: size.width,
+          deviceHeight: size.height,
           timestamp: Date.now() / 1000,
         });
       }

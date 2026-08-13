@@ -259,7 +259,7 @@ export class PageAgent {
         getFullAXTree: this._getFullAXTree.bind(this),
         insertText: this._insertText.bind(this),
         startElementScreencast: this._startElementScreencast.bind(this),
-        getElementScreencastBoundingBox: this._getElementScreencastBoundingBox.bind(this),
+        captureElementScreencastFrame: this._captureElementScreencastFrame.bind(this),
         stopElementScreencast: this._stopElementScreencast.bind(this),
         scrollIntoViewIfNeeded: this._scrollIntoViewIfNeeded.bind(this),
         setFileInputFiles: this._setFileInputFiles.bind(this),
@@ -583,23 +583,17 @@ export class PageAgent {
     if (!unsafeObject)
       throw new Error('Failed to find screencast element');
     this._elementScreencastNode = unsafeObject;
-    return this._getElementScreencastBoundingBox();
+    const box = this._getNodeBoundingBox(unsafeObject);
+    if (!box || box.width <= 0 || box.height <= 0)
+      throw new Error('Screencast element has no visible layout box');
   }
 
-  _getElementScreencastBoundingBox() {
+  async _captureElementScreencastFrame() {
     const node = this._elementScreencastNode;
     if (!node || !node.isConnected)
       throw new Error('Screencast element is detached from document');
-    const box = this._getNodeBoundingBox(node);
-    if (!box || box.width <= 0 || box.height <= 0)
-      throw new Error('Screencast element has no visible layout box');
-    const x = Math.floor(box.x);
-    const y = Math.floor(box.y);
     return {
-      x,
-      y,
-      width: Math.ceil(box.x + box.width) - x,
-      height: Math.ceil(box.y + box.height) - y,
+      data: await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
     };
   }
 

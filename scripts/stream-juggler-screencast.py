@@ -226,7 +226,10 @@ class MjpegHandler(SimpleHTTPRequestHandler):
                 continue
             try:
                 self.wfile.write(b"--rotunda-frame\r\n")
-                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                content_type = (
+                    b"image/png" if frame.startswith(b"\x89PNG\r\n\x1a\n") else b"image/jpeg"
+                )
+                self.wfile.write(b"Content-Type: " + content_type + b"\r\n")
                 self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode())
                 self.wfile.write(frame)
                 self.wfile.write(b"\r\n")
@@ -352,6 +355,15 @@ def jpeg_size(data: bytes) -> dict[str, int] | None:
             }
         offset += segment_length
     return None
+
+
+def image_size(data: bytes) -> dict[str, int] | None:
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return {
+            "width": int.from_bytes(data[16:20], "big"),
+            "height": int.from_bytes(data[20:24], "big"),
+        }
+    return jpeg_size(data)
 
 
 def format_size(size: dict[str, int]) -> str:
@@ -488,7 +500,7 @@ async def stream(args: SimpleNamespace) -> None:
                 def on_frame(frame: dict[str, Any]) -> None:
                     nonlocal actual_frame_size, frame_count
                     frame_data = normalize_frame_data(frame["data"])
-                    new_size = jpeg_size(frame_data)
+                    new_size = image_size(frame_data)
                     if new_size and new_size != actual_frame_size:
                         actual_frame_size = new_size
                         print(
@@ -549,7 +561,7 @@ def _validate_range(param_hint: str, value: int | float, lower: int | float, upp
 
 @click.command(
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Stream Rotunda/Juggler screencast frames as HLS or MJPEG.",
+    help="Stream Rotunda/Juggler screencast frames as HLS or multipart images.",
 )
 @click.option("--endpoint", help="Existing remote Juggler HTTP or WebSocket endpoint.")
 @click.option("--executable-path", help="Rotunda executable to launch when --endpoint is not used.")
@@ -559,10 +571,10 @@ def _validate_range(param_hint: str, value: int | float, lower: int | float, upp
 @click.option("--new-context", is_flag=True, help="Create a new context when attaching to an endpoint.")
 @click.option("--new-page", is_flag=True, help="Create a new page when attaching to an endpoint.")
 @click.option("--page-index", type=int, default=0, show_default=True, help="Existing page index to stream when attaching.")
-@click.option("--selector", help="Stream the first element matching this Playwright selector as MJPEG.")
+@click.option("--selector", help="Stream the first matching element as isolated transparent PNG frames.")
 @click.option("--viewport", default="1280x720", show_default=True, callback=_viewport_callback, help="Browser viewport, formatted as WIDTHxHEIGHT.")
 @click.option("--capture-size", callback=_viewport_callback, help="Juggler JPEG frame size. Defaults to the page viewport.")
-@click.option("--quality", type=int, default=95, show_default=True, help="Juggler JPEG quality, 1-100.")
+@click.option("--quality", type=int, default=95, show_default=True, help="Juggler page-stream JPEG quality, 1-100. Selector PNG streams ignore it.")
 @click.option("--fps", type=int, default=25, show_default=True, help="Output stream FPS.")
 @click.option("--seed-screenshot/--no-seed-screenshot", default=False, show_default=True, help="Seed the stream with a JPEG screenshot before live frames arrive. Off by default so the stream size is set by the first Juggler frame.")
 @click.option("--print-frames", type=int, default=0, show_default=True, help="Print every N received Juggler frames.")

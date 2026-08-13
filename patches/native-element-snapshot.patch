@@ -1,0 +1,399 @@
+diff --git a/dom/chrome-webidl/WindowGlobalActors.webidl b/dom/chrome-webidl/WindowGlobalActors.webidl
+index a1f031ffe2..c8f8226d13 100644
+--- a/dom/chrome-webidl/WindowGlobalActors.webidl
++++ b/dom/chrome-webidl/WindowGlobalActors.webidl
+@@ -217,4 +217,9 @@ interface WindowGlobalChild {
+   [Throws]
+   JSWindowActorChild getActor(UTF8String name);
+   JSWindowActorChild? getExistingActor(UTF8String name);
++
++  /** Paint an element subtree on a transparent surface and return PNG data. */
++  [NewObject]
++  Promise<DOMString> drawElementSnapshot(Element element,
++                                         optional double scale = 1.0);
+ };
+diff --git a/dom/ipc/PWindowGlobal.ipdl b/dom/ipc/PWindowGlobal.ipdl
+index 91dc9ac48f..c0944048b7 100644
+--- a/dom/ipc/PWindowGlobal.ipdl
++++ b/dom/ipc/PWindowGlobal.ipdl
+@@ -107,6 +107,9 @@ both:
+                    nullable StructuredCloneData aStack);
+ 
+ parent:
++  async DrawElementSnapshot(PaintFragment aFragment)
++    returns (nsCString data);
++
+   // Load the given URI load state into the current owner process of the given
+   // BrowsingContext. aTargetBC must be in the same BrowsingContextGroup as this
+   // window global.
+diff --git a/dom/ipc/WindowGlobalChild.cpp b/dom/ipc/WindowGlobalChild.cpp
+index ceb57c0341..df5da1cdea 100644
+--- a/dom/ipc/WindowGlobalChild.cpp
++++ b/dom/ipc/WindowGlobalChild.cpp
+@@ -36,6 +36,7 @@
+ #include "mozilla/dom/WindowContext.h"
+ #include "mozilla/dom/WindowGlobalActorsBinding.h"
+ #include "mozilla/dom/WindowGlobalParent.h"
++#include "mozilla/gfx/CrossProcessPaint.h"
+ #include "mozilla/ipc/Endpoint.h"
+ #include "nsContentUtils.h"
+ #include "nsDocShell.h"
+@@ -796,6 +797,42 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
+   return JSActorManager::GetExistingActor(aName).downcast<JSWindowActorChild>();
+ }
+ 
++already_AddRefed<Promise> WindowGlobalChild::DrawElementSnapshot(
++    Element& aElement, double aScale, ErrorResult& aRv) {
++  RefPtr<Promise> promise = Promise::Create(mWindowGlobal->AsGlobal(), aRv);
++  if (aRv.Failed()) {
++    return nullptr;
++  }
++  if (aScale <= 0 || aElement.OwnerDoc() != mWindowGlobal->GetExtantDoc()) {
++    promise->MaybeReject(NS_ERROR_INVALID_ARG);
++    return promise.forget();
++  }
++
++  gfx::PaintFragment fragment =
++      gfx::PaintFragment::RecordElement(&aElement, aScale);
++  if (fragment.IsEmpty()) {
++    promise->MaybeReject(NS_ERROR_FAILURE);
++    return promise.forget();
++  }
++
++  SendDrawElementSnapshot(std::move(fragment))
++      ->Then(GetCurrentSerialEventTarget(), __func__,
++             [promise](PWindowGlobalChild::DrawElementSnapshotPromise::
++                           ResolveOrRejectValue&& aResult) {
++               if (aResult.IsResolve()) {
++                 const nsCString& data = aResult.ResolveValue();
++                 if (data.IsEmpty()) {
++                   promise->MaybeReject(NS_ERROR_FAILURE);
++                 } else {
++                   promise->MaybeResolve(NS_ConvertUTF8toUTF16(data));
++                 }
++               } else {
++                 promise->MaybeReject(NS_ERROR_FAILURE);
++               }
++             });
++  return promise.forget();
++}
++
+ already_AddRefed<JSActor> WindowGlobalChild::InitJSActor(
+     JS::Handle<JSObject*> aMaybeActor, const nsACString& aName,
+     ErrorResult& aRv) {
+diff --git a/dom/ipc/WindowGlobalChild.h b/dom/ipc/WindowGlobalChild.h
+index 956a5313b4..104932f8e2 100644
+--- a/dom/ipc/WindowGlobalChild.h
++++ b/dom/ipc/WindowGlobalChild.h
+@@ -25,6 +25,7 @@ class WindowGlobalParent;
+ class JSWindowActorChild;
+ class JSActorMessageMeta;
+ class BrowserChild;
++class Promise;
+ 
+ /**
+  * Actor for a single nsGlobalWindowInner. This actor is used to communicate
+@@ -143,6 +144,10 @@ class WindowGlobalChild final : public WindowGlobalActor,
+   dom::BrowsingContext* FindBrowsingContextWithName(
+       const nsAString& aName, bool aUseEntryGlobalForAccessCheck = true);
+ 
++  already_AddRefed<Promise> DrawElementSnapshot(Element& aElement,
++                                                double aScale,
++                                                ErrorResult& aRv);
++
+   nsISupports* GetParentObject();
+   JSObject* WrapObject(JSContext* aCx,
+                        JS::Handle<JSObject*> aGivenProto) override;
+diff --git a/dom/ipc/WindowGlobalParent.cpp b/dom/ipc/WindowGlobalParent.cpp
+index b2a1203401..805642ab1a 100644
+--- a/dom/ipc/WindowGlobalParent.cpp
++++ b/dom/ipc/WindowGlobalParent.cpp
+@@ -7,6 +7,9 @@
+ #include <algorithm>
+ 
+ #include "MMPrinter.h"
++#include "gfxPlatform.h"
++#include "gfxUtils.h"
++#include "mozilla/Base64.h"
+ #include "mozilla/AntiTrackingUtils.h"
+ #include "mozilla/AsyncEventDispatcher.h"
+ #include "mozilla/BounceTrackingProtection.h"
+@@ -55,6 +58,9 @@
+ #include "mozilla/glean/DomUseCounterMetrics.h"
+ #include "mozilla/glean/GeckoviewMetrics.h"
+ #include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
++#include "mozilla/gfx/CrossProcessPaint.h"
++#include "mozilla/gfx/InlineTranslator.h"
++#include "mozilla/gfx/RecordedEvent.h"
+ #include "mozilla/ipc/ProtocolUtils.h"
+ #include "mozilla/net/CookieServiceParent.h"
+ #include "mozilla/net/NeckoParent.h"
+@@ -1112,6 +1118,67 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
+   return promise.forget();
+ }
+ 
++mozilla::ipc::IPCResult WindowGlobalParent::RecvDrawElementSnapshot(
++    gfx::PaintFragment&& aFragment,
++    DrawElementSnapshotResolver&& aResolve) {
++  RefPtr<gfx::CrossProcessPaint::ResolvePromise> promise =
++      gfx::CrossProcessPaint::Start(
++          std::move(aFragment),
++          gfx::CrossProcessPaintFlags::UseHighQualityScaling);
++  promise->Then(
++      GetMainThreadSerialEventTarget(), __func__,
++      [resolve = std::move(aResolve)](
++          gfx::CrossProcessPaint::ResolvePromise::ResolveOrRejectValue&&
++              aResult) mutable {
++        if (aResult.IsReject()) {
++          resolve(nsCString());
++          return;
++        }
++        gfx::CrossProcessPaint::ResolvedFragmentMap aFragments =
++            std::move(aResult.ResolveValue());
++        RefPtr<gfx::RecordedDependentSurface> root = aFragments.Get(TabId(0));
++        if (!root) {
++          resolve(nsCString());
++          return;
++        }
++        RefPtr<gfx::DrawTarget> drawTarget =
++            gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
++                root->mSize, gfx::SurfaceFormat::B8G8R8A8);
++        if (!drawTarget || !drawTarget->IsValid()) {
++          resolve(nsCString());
++          return;
++        }
++        gfx::InlineTranslator translator(drawTarget, nullptr);
++        translator.SetDependentSurfaces(&aFragments);
++        if (!translator.TranslateRecording((char*)root->mRecording.mData,
++                                           root->mRecording.mLen)) {
++          resolve(nsCString());
++          return;
++        }
++        RefPtr<gfx::SourceSurface> snapshot = drawTarget->Snapshot();
++        if (!snapshot) {
++          resolve(nsCString());
++          return;
++        }
++        Maybe<nsTArray<uint8_t>> bytes =
++            gfxUtils::EncodeSourceSurfaceAsBytes(
++                snapshot, ImageType::PNG, u""_ns);
++        if (!bytes) {
++          resolve(nsCString());
++          return;
++        }
++        nsCString data;
++        nsDependentCSubstring raw(
++            reinterpret_cast<const char*>(bytes->Elements()), bytes->Length());
++        if (NS_FAILED(Base64Encode(raw, data))) {
++          resolve(nsCString());
++          return;
++        }
++        resolve(std::move(data));
++      });
++  return IPC_OK();
++}
++
+ void WindowGlobalParent::DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
+                                               const Maybe<IntRect>& aRect,
+                                               float aScale,
+diff --git a/dom/ipc/WindowGlobalParent.h b/dom/ipc/WindowGlobalParent.h
+index 5d14266e42..8096e144d3 100644
+--- a/dom/ipc/WindowGlobalParent.h
++++ b/dom/ipc/WindowGlobalParent.h
+@@ -33,6 +33,7 @@ namespace mozilla {
+ 
+ namespace gfx {
+ class CrossProcessPaint;
++class PaintFragment;
+ }  // namespace gfx
+ 
+ namespace dom {
+@@ -295,6 +296,10 @@ class WindowGlobalParent final : public WindowContext,
+   mozilla::ipc::IPCResult RecvUpdateCookieJarSettings(
+       const CookieJarSettingsArgs& aCookieJarSettingsArgs);
+ 
++  mozilla::ipc::IPCResult RecvDrawElementSnapshot(
++      gfx::PaintFragment&& aFragment,
++      DrawElementSnapshotResolver&& aResolve);
++
+   void ActorDestroy(ActorDestroyReason aWhy) override;
+ 
+   void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
+diff --git a/gfx/ipc/CrossProcessPaint.cpp b/gfx/ipc/CrossProcessPaint.cpp
+index baa8899738..611abc62e7 100644
+--- a/gfx/ipc/CrossProcessPaint.cpp
++++ b/gfx/ipc/CrossProcessPaint.cpp
+@@ -4,8 +4,11 @@
+ 
+ #include "CrossProcessPaint.h"
+ 
++#include <cmath>
++
+ #include "mozilla/dom/CanonicalBrowsingContext.h"
+ #include "mozilla/dom/ContentProcessManager.h"
++#include "mozilla/dom/Element.h"
+ #include "mozilla/dom/ImageBitmap.h"
+ #include "mozilla/dom/BrowserParent.h"
+ #include "mozilla/dom/PWindowGlobalParent.h"
+@@ -22,7 +25,10 @@
+ #include "gfxPlatform.h"
+ 
+ #include "nsContentUtils.h"
++#include "nsDeviceContext.h"
+ #include "nsIDocShell.h"
++#include "nsIFrame.h"
++#include "nsLayoutUtils.h"
+ #include "nsPresContext.h"
+ 
+ static mozilla::LazyLogModule gCrossProcessPaintLog("CrossProcessPaint");
+@@ -175,6 +181,97 @@ PaintFragment PaintFragment::Record(dom::BrowsingContext* aBc,
+   return fragment;
+ }
+ 
++/* static */
++PaintFragment PaintFragment::RecordElement(dom::Element* aElement,
++                                           float aScale) {
++  if (!aElement || aScale <= 0) {
++    return PaintFragment{};
++  }
++
++  dom::Document* document = aElement->OwnerDoc();
++  nsContentUtils::FlushLayoutForTree(document->GetWindow());
++  nsIFrame* rootFrame = aElement->GetPrimaryFrame();
++  if (!rootFrame) {
++    return PaintFragment{};
++  }
++  rootFrame = rootFrame->FirstContinuation();
++
++  nsRect inkOverflow;
++  bool hasInk = false;
++  for (nsIFrame* frame = rootFrame; frame;
++       frame = frame->GetNextContinuation()) {
++    nsRect rect = frame->InkOverflowRect();
++    rect.MoveBy(frame->GetOffsetTo(rootFrame));
++    if (hasInk) {
++      inkOverflow.UnionRect(inkOverflow, rect);
++    } else {
++      inkOverflow = rect;
++      hasInk = true;
++    }
++  }
++  if (!hasInk || inkOverflow.IsEmpty()) {
++    return PaintFragment{};
++  }
++
++  RefPtr<nsPresContext> presContext = rootFrame->PresContext();
++  CSSIntRect rect = RoundedOut(CSSPixel::FromAppUnits(inkOverflow));
++  IntSize surfaceSize(int32_t(std::ceil(rect.width * aScale)),
++                      int32_t(std::ceil(rect.height * aScale)));
++  if (surfaceSize.IsEmpty() || !Factory::CheckSurfaceSize(surfaceSize)) {
++    return PaintFragment{};
++  }
++
++  SurfaceFormat format = SurfaceFormat::B8G8R8A8;
++  RefPtr<DrawTarget> referenceDt = Factory::CreateDrawTarget(
++      gfxPlatform::GetPlatform()->GetSoftwareBackend(), IntSize(1, 1), format);
++  RefPtr<DrawEventRecorderMemory> recorder =
++      MakeAndAddRef<DrawEventRecorderMemory>(nullptr);
++  RefPtr<DrawTarget> dt = Factory::CreateRecordingDrawTarget(
++      recorder, referenceDt, IntRect(IntPoint(), surfaceSize));
++  if (!dt || !dt->IsValid()) {
++    return PaintFragment{};
++  }
++
++  gfxContext context(dt);
++  context.SetMatrix(Matrix::Scaling(aScale, aScale));
++  context.SetCrossProcessPaintScale(aScale);
++  gfxFloat cssToDev = gfxFloat(presContext->AppUnitsPerDevPixel()) /
++                      AppUnitsPerCSSPixel();
++  gfxPoint offset(-rect.x, -rect.y);
++  context.SetMatrixDouble(context.CurrentMatrixDouble()
++                              .PreTranslate(offset)
++                              .PreScale(cssToDev, cssToDev)
++                              .NudgeToIntegers());
++
++  using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
++  PaintFrameFlags flags = PaintFrameFlags::InTransform |
++                          PaintFrameFlags::SyncDecodeImages |
++                          PaintFrameFlags::IgnoreSuppression |
++                          PaintFrameFlags::HideCaret |
++                          PaintFrameFlags::UseHighQualityScaling;
++  nsLayoutUtils::PaintFrame(&context, rootFrame,
++                            nsRegion(CSSPixel::ToAppUnits(rect)),
++                            NS_RGBA(0, 0, 0, 0),
++                            nsDisplayListBuilderMode::Painting, flags);
++
++  if (!recorder->mOutputStream.mValid) {
++    recorder->DetachResources();
++    return PaintFragment{};
++  }
++
++  ByteBuf recording = ByteBuf((uint8_t*)recorder->mOutputStream.mData,
++                              recorder->mOutputStream.mLength,
++                              recorder->mOutputStream.mCapacity);
++  recorder->mOutputStream.mData = nullptr;
++  recorder->mOutputStream.mLength = 0;
++  recorder->mOutputStream.mCapacity = 0;
++
++  nsTHashSet<uint64_t> dependencies = recorder->TakeDependentSurfaces();
++  recorder->DetachResources();
++  return PaintFragment{surfaceSize, std::move(recording),
++                       std::move(dependencies)};
++}
++
+ bool PaintFragment::IsEmpty() const {
+   return !mRecording.mData || mRecording.mLen == 0 || mSize == IntSize(0, 0);
+ }
+@@ -325,6 +422,19 @@ RefPtr<CrossProcessPaint::ResolvePromise> CrossProcessPaint::Start(
+   return promise;
+ }
+ 
++/* static */
++RefPtr<CrossProcessPaint::ResolvePromise> CrossProcessPaint::Start(
++    PaintFragment&& aRoot, CrossProcessPaintFlags aFlags) {
++  RefPtr<CrossProcessPaint> resolver =
++      new CrossProcessPaint(1.0, dom::TabId(0), aFlags);
++  RefPtr<ResolvePromise> promise = resolver->Init();
++  resolver->QueueDependencies(aRoot.mDependencies);
++  resolver->mReceivedFragments.InsertOrUpdate(dom::TabId(0),
++                                              std::move(aRoot));
++  resolver->MaybeResolve();
++  return promise;
++}
++
+ CrossProcessPaint::CrossProcessPaint(float aScale, dom::TabId aRoot,
+                                      CrossProcessPaintFlags aFlags)
+     : mRoot{aRoot}, mScale{aScale}, mPendingFragments{0}, mFlags{aFlags} {}
+diff --git a/gfx/ipc/CrossProcessPaint.h b/gfx/ipc/CrossProcessPaint.h
+index 02aee61df2..17bd5711e3 100644
+--- a/gfx/ipc/CrossProcessPaint.h
++++ b/gfx/ipc/CrossProcessPaint.h
+@@ -29,6 +29,7 @@ namespace mozilla {
+ namespace dom {
+ class CanonicalBrowsingContext;
+ class DOMRect;
++class Element;
+ class Promise;
+ class WindowGlobalParent;
+ }  // namespace dom
+@@ -75,6 +76,9 @@ class PaintFragment final {
+                               nscolor aBackgroundColor,
+                               CrossProcessPaintFlags aFlags);
+ 
++  /** Records only an element's layout frame and descendants on transparency. */
++  static PaintFragment RecordElement(dom::Element* aElement, float aScale);
++
+   /// Returns whether this paint fragment contains a valid recording.
+   bool IsEmpty() const;
+ 
+@@ -133,6 +137,10 @@ class CrossProcessPaint final {
+       nsTHashSet<uint64_t>&& aDependencies,
+       CrossProcessPaintFlags aFlags = CrossProcessPaintFlags::None);
+ 
++  static RefPtr<ResolvePromise> Start(
++      PaintFragment&& aRoot,
++      CrossProcessPaintFlags aFlags = CrossProcessPaintFlags::None);
++
+   void ReceiveFragment(dom::WindowGlobalParent* aWGP,
+                        PaintFragment&& aFragment);
+   void LostFragment(dom::WindowGlobalParent* aWGP);

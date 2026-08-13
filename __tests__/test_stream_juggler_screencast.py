@@ -13,6 +13,15 @@ STREAM = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(STREAM)
 
 
+def test_image_size_reads_png_dimensions() -> None:
+    # Selector streams use PNG so alpha survives the multipart transport.
+    header = b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + (321).to_bytes(4, "big") + (
+        123
+    ).to_bytes(4, "big")
+
+    assert STREAM.image_size(header) == {"width": 321, "height": 123}
+
+
 class RecordingChannel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, dict[str, object]]] = []
