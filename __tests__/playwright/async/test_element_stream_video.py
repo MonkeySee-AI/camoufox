@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import importlib.util
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -33,19 +32,15 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         pytest.skip("system FFmpeg is not installed")
-    encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
     frame_source = CORE.LatestFrame()
     fragments = VIDEO.FragmentStream()
-    video = VIDEO.RealtimeVideoStreamer(
+    _, codec = VIDEO.h264_level(320, 180)
+    video = VIDEO.NativeVideoMuxer(
         ffmpeg=ffmpeg,
-        encoder=encoder,
         frame_source=frame_source,
         fragments=fragments,
-        width=320,
-        height=180,
         fps=30,
-        bitrate_mbps=2,
-        background="080b12",
+        codec=codec,
     )
     server = VIDEO.start_viewer_server("127.0.0.1", 0, fragments, video.codec)
     try:
@@ -55,8 +50,8 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
     viewer = await chrome.new_page()
 
     try:
-        # A changing translucent element ensures the video is fed by the live
-        # isolated selector path rather than a synthetic encoder fixture.
+        # A changing translucent element ensures native paint and platform
+        # encoding feed the live stream rather than a synthetic fixture.
         await page.set_content(
             """
             <style>
@@ -78,9 +73,11 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
             page,
             on_frame,
             quality=90,
-            size=None,
+            size={"width": 320, "height": 180},
             selector="#target",
             fps=30,
+            video=True,
+            bitrate=2_000_000,
         )
         host, port = server.server_address[:2]
         await viewer.goto(f"http://{host}:{port}/")

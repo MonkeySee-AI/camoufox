@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "pillow>=10",
 #   "rotunda",
 # ]
 #
@@ -15,7 +14,6 @@ import argparse
 import asyncio
 import contextlib
 import importlib.util
-import io
 import signal
 import subprocess
 import sys
@@ -27,7 +25,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import BinaryIO
 
-from PIL import Image
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).parents[1]
@@ -109,78 +106,51 @@ def h264_level(width: int, height: int) -> tuple[str, str]:
     return "3.2", "avc1.42C020"
 
 
-def fit_element_frame(
-    png: bytes, width: int, height: int, background: str
-) -> bytes:
-    with Image.open(io.BytesIO(png)) as source:
-        source.thumbnail((width, height), Image.Resampling.BILINEAR)
-        source = source.convert("RGBA")
-        canvas = Image.new("RGB", (width, height), f"#{background}")
-        canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2), source)
-        return canvas.tobytes()
+def parse_native_frames(packet: bytes) -> list[bytes]:
+    frames = []
+    offset = 0
+    while offset < len(packet):
+        if len(packet) - offset < 29 or packet[offset : offset + 4] != b"RSE1":
+            raise ValueError("invalid native selector video packet")
+        size = int.from_bytes(packet[offset + 5 : offset + 9], "big")
+        offset += 29
+        if size > len(packet) - offset:
+            raise ValueError("truncated native selector video frame")
+        frames.append(packet[offset : offset + size])
+        offset += size
+    return frames
 
 
-class RealtimeVideoStreamer:
+class NativeVideoMuxer:
     def __init__(
         self,
         *,
         ffmpeg: str,
-        encoder: str,
         frame_source: object,
         fragments: FragmentStream,
-        width: int,
-        height: int,
         fps: int,
-        bitrate_mbps: float,
-        background: str,
+        codec: str,
     ) -> None:
-        level, self.codec = h264_level(width, height)
-        encoder_options = (
-            ["-realtime", "1", "-allow_sw", "1"]
-            if encoder == "h264_videotoolbox"
-            else ["-preset", "ultrafast", "-tune", "zerolatency"]
-        )
-        bitrate = f"{bitrate_mbps:g}M"
+        self.codec = codec
         self._process = subprocess.Popen(  # nosec - local developer POC.
             [
                 ffmpeg,
                 "-hide_banner",
                 "-loglevel",
                 "warning",
+                "-fflags",
+                "+genpts",
+                "-use_wallclock_as_timestamps",
+                "1",
                 "-f",
-                "rawvideo",
-                "-pixel_format",
-                "rgb24",
-                "-video_size",
-                f"{width}x{height}",
+                "h264",
                 "-framerate",
                 str(fps),
                 "-i",
                 "pipe:0",
                 "-an",
                 "-c:v",
-                encoder,
-                "-profile:v",
-                "baseline",
-                "-level:v",
-                level,
-                "-flags",
-                "+low_delay",
-                *encoder_options,
-                "-b:v",
-                bitrate,
-                "-maxrate",
-                bitrate,
-                "-bufsize",
-                bitrate,
-                "-g",
-                str(fps),
-                "-keyint_min",
-                str(fps),
-                "-bf",
-                "0",
-                "-pix_fmt",
-                "yuv420p",
+                "copy",
                 "-movflags",
                 "+empty_moov+default_base_moof+frag_every_frame",
                 "-f",
@@ -192,17 +162,9 @@ class RealtimeVideoStreamer:
             stderr=subprocess.PIPE,
         )
         self._frame_source = frame_source
-        self._encoded_frames = CORE.LatestFrame()
         self._fragments = fragments
-        self._width = width
-        self._height = height
-        self._background = background
-        self._fps = fps
         self._stopped = threading.Event()
         self._threads = [
-            threading.Thread(
-                target=self._convert_frames, name="selector-video-convert", daemon=True
-            ),
             threading.Thread(target=self._pump_frames, name="selector-video-input", daemon=True),
             threading.Thread(target=self._read_fragments, name="selector-video-output", daemon=True),
             threading.Thread(target=self._drain_stderr, name="selector-video-stderr", daemon=True),
@@ -210,39 +172,23 @@ class RealtimeVideoStreamer:
         for thread in self._threads:
             thread.start()
 
-    def _convert_frames(self) -> None:
+    def _pump_frames(self) -> None:
+        stdin = self._process.stdin
+        if stdin is None:
+            return
         sequence = 0
-        while not self._stopped.is_set():
-            sequence, frame = self._frame_source.wait_for_next(sequence, timeout=0.1)
-            if frame is None:
+        while not self._stopped.is_set() and self._process.poll() is None:
+            sequence, packet = self._frame_source.wait_for_next(sequence, timeout=0.1)
+            if packet is None:
                 if self._frame_source.closed:
                     return
                 continue
-            self._encoded_frames.update(
-                fit_element_frame(frame, self._width, self._height, self._background)
-            )
-
-    def _pump_frames(self) -> None:
-        frame = self._encoded_frames.wait_for_first()
-        stdin = self._process.stdin
-        if frame is None or stdin is None:
-            return
-        next_tick = time.monotonic()
-        while not self._stopped.is_set() and self._process.poll() is None:
-            latest = self._encoded_frames.latest()
-            if latest is not None:
-                frame = latest
             try:
-                stdin.write(frame)
+                for frame in parse_native_frames(packet):
+                    stdin.write(frame)
                 stdin.flush()
-            except (BrokenPipeError, OSError):
+            except (BrokenPipeError, OSError, ValueError):
                 return
-            next_tick += 1 / self._fps
-            delay = next_tick - time.monotonic()
-            if delay > 0:
-                self._stopped.wait(delay)
-            else:
-                next_tick = time.monotonic()
 
     def _read_fragments(self) -> None:
         stdout = self._process.stdout
@@ -280,7 +226,6 @@ class RealtimeVideoStreamer:
 
     def close(self) -> None:
         self._stopped.set()
-        self._encoded_frames.close()
         with contextlib.suppress(OSError):
             if self._process.stdin:
                 self._process.stdin.close()
@@ -410,20 +355,20 @@ def start_viewer_server(
 async def stream(args: argparse.Namespace) -> None:
     frame_source = CORE.LatestFrame()
     fragments = FragmentStream()
-    video = RealtimeVideoStreamer(
+    _, codec = h264_level(args.video_size["width"], args.video_size["height"])
+    video = NativeVideoMuxer(
         ffmpeg=args.ffmpeg,
-        encoder=args.encoder,
         frame_source=frame_source,
         fragments=fragments,
-        width=args.video_size["width"],
-        height=args.video_size["height"],
         fps=args.fps,
-        bitrate_mbps=args.bitrate_mbps,
-        background=args.background,
+        codec=codec,
     )
     server = start_viewer_server(args.host, args.port, fragments, video.codec)
     host, port = server.server_address[:2]
     print(f"Low-latency viewer: http://{host}:{port}/", flush=True)
+    benchmark_frames = 0
+    benchmark_bytes = 0
+    benchmark_started = benchmark_ended = 0.0
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -440,20 +385,28 @@ async def stream(args: argparse.Namespace) -> None:
                 await page.locator(args.selector).first.wait_for(state="visible", timeout=15_000)
 
                 def on_frame(frame: dict[str, object]) -> None:
-                    # ponytail: the PNG bridge proves the video path; production must feed
-                    # the Gecko surface directly to VideoToolbox for 4K zero-copy capture.
-                    frame_source.update(CORE.normalize_frame_data(frame["data"]))
+                    nonlocal benchmark_frames, benchmark_bytes
+                    packet = CORE.normalize_frame_data(frame["data"])
+                    benchmark_frames += len(parse_native_frames(packet))
+                    benchmark_bytes += len(packet)
+                    frame_source.update(packet)
 
+                benchmark_started = time.monotonic()
                 await CORE.start_screencast(
                     page,
                     on_frame,
                     quality=90,
-                    size=None,
+                    size=args.video_size,
                     selector=args.selector,
                     fps=args.fps,
+                    video=True,
+                    bitrate=round(args.bitrate_mbps * 1_000_000),
                 )
+                if args.benchmark_seconds:
+                    loop.call_later(args.benchmark_seconds, stop.set)
                 try:
                     await stop.wait()
+                    benchmark_ended = time.monotonic()
                 finally:
                     with contextlib.suppress(Exception):
                         await page.screencast.stop()
@@ -465,6 +418,14 @@ async def stream(args: argparse.Namespace) -> None:
         video.close()
         server.shutdown()
         server.server_close()
+    if args.benchmark_seconds:
+        elapsed = benchmark_ended - benchmark_started
+        print(
+            f"Native input: {benchmark_frames} frames, "
+            f"{benchmark_frames / elapsed:.2f} fps, "
+            f"{benchmark_bytes * 8 / elapsed / 1_000_000:.2f} Mbps",
+            flush=True,
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -484,21 +445,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video-size", type=CORE.parse_viewport, default="1280x720")
     parser.add_argument("--fps", type=int, choices=range(1, 61), default=60)
     parser.add_argument("--bitrate-mbps", type=float, default=12)
-    parser.add_argument("--background", default="080b12")
     parser.add_argument("--ffmpeg", default="ffmpeg")
-    parser.add_argument(
-        "--encoder",
-        default="h264_videotoolbox" if sys.platform == "darwin" else "libx264",
-    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8900)
+    parser.add_argument(
+        "--benchmark-seconds",
+        type=float,
+        help="stop after this many seconds and report fresh encoded input rate",
+    )
     args = parser.parse_args()
     if any(dimension % 2 for dimension in args.video_size.values()):
         parser.error("--video-size dimensions must be even")
-    if len(args.background) != 6 or any(c not in "0123456789abcdefABCDEF" for c in args.background):
-        parser.error("--background must be a six-digit RGB hex value")
     if args.bitrate_mbps <= 0:
         parser.error("--bitrate-mbps must be positive")
+    if args.benchmark_seconds is not None and args.benchmark_seconds <= 0:
+        parser.error("--benchmark-seconds must be positive")
     return args
 
 

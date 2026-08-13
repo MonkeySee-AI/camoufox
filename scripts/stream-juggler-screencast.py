@@ -404,6 +404,8 @@ async def start_screencast(
     *,
     selector: str | None = None,
     fps: int = 25,
+    video: bool = False,
+    bitrate: int = 12_000_000,
 ) -> None:
     screencast = page.screencast._impl_obj
     if screencast._started:
@@ -420,6 +422,8 @@ async def start_screencast(
             params["size"] = size
         if selector:
             params.update(selector=selector, fps=fps)
+        if video:
+            params.update(video=True, bitrate=bitrate)
         await screencast._page._channel.send_return_as_dict(
             "screencastStart",
             None,

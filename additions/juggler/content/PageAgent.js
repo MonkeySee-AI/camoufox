@@ -575,7 +575,7 @@ export class PageAgent {
     return {x: x1, y: y1, width: x2 - x1, height: y2 - y1};
   }
 
-  _startElementScreencast({objectId, frameId}) {
+  _startElementScreencast({objectId, frameId, video = false}) {
     const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
@@ -586,19 +586,26 @@ export class PageAgent {
     const box = this._getNodeBoundingBox(unsafeObject);
     if (!box || box.width <= 0 || box.height <= 0)
       throw new Error('Screencast element has no visible layout box');
+    this._elementScreencastVideo = video;
   }
 
-  async _captureElementScreencastFrame() {
+  async _captureElementScreencastFrame({width, height, fps, bitrate, frameIndex}) {
     const node = this._elementScreencastNode;
     if (!node || !node.isConnected)
       throw new Error('Screencast element is detached from document');
     return {
-      data: await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
+      data: this._elementScreencastVideo
+        ? await node.ownerGlobal.windowGlobalChild.encodeElementVideoFrame(
+            node, width, height, fps, bitrate, frameIndex)
+        : await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
     };
   }
 
-  _stopElementScreencast() {
+  async _stopElementScreencast() {
+    if (this._elementScreencastVideo && this._elementScreencastNode)
+      await this._elementScreencastNode.ownerGlobal.windowGlobalChild.stopElementVideoStream();
     this._elementScreencastNode = null;
+    this._elementScreencastVideo = false;
   }
 
   async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}) {

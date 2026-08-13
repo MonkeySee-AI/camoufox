@@ -19,6 +19,8 @@ function patchValidator(validatorFilename) {
     record: tOptional(tBoolean),
     selector: tOptional(tString),
     fps: tOptional(tInt),
+    video: tOptional(tBoolean),
+    bitrate: tOptional(tInt),
   });
 }
 
@@ -57,6 +59,10 @@ function patchPageDispatcher(dispatcherModule) {
       await session.send("Page.startScreencast", {
         quality: params.quality ?? 90,
         fps: params.fps ?? 25,
+        video: params.video ?? false,
+        bitrate: params.bitrate ?? 12000000,
+        width: params.size?.width,
+        height: params.size?.height,
         frameId: element._context.frame._id,
         objectId: element._objectId,
       });

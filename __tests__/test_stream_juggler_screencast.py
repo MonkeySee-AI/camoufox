@@ -33,9 +33,9 @@ class RecordingChannel:
         return {}
 
 
-async def test_element_stream_serializes_selector_into_screencast_start() -> None:
-    # Selector capture must use the live screencast channel once; per-frame
-    # browser behavior belongs to the real Rotunda integration test.
+async def test_element_video_serializes_native_stream_options() -> None:
+    # Selector video must carry its fixed encoder canvas and bitrate through
+    # Playwright once; per-frame behavior belongs to the Rotunda integration.
     channel = RecordingChannel()
     screencast = SimpleNamespace(
         _started=False,
@@ -49,9 +49,11 @@ async def test_element_stream_serializes_selector_into_screencast_start() -> Non
         page,
         on_frame,
         91,
-        None,
+        {"width": 1920, "height": 1080},
         selector="#target",
         fps=37,
+        video=True,
+        bitrate=8_000_000,
     )
 
     assert channel.calls == [
@@ -62,8 +64,11 @@ async def test_element_stream_serializes_selector_into_screencast_start() -> Non
                 "quality": 91,
                 "sendFrames": True,
                 "record": False,
+                "size": {"width": 1920, "height": 1080},
                 "selector": "#target",
                 "fps": 37,
+                "video": True,
+                "bitrate": 8_000_000,
             },
         )
     ]

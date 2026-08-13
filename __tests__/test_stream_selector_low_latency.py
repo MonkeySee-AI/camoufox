@@ -52,21 +52,31 @@ def test_fragment_stream_preserves_encoded_order() -> None:
     assert (next_sequence, second) == (2, b"two")
 
 
-def test_fit_element_frame_centers_and_flattens_alpha() -> None:
-    # The codec canvas stays fixed across selector resizes and H.264 receives
-    # opaque RGB pixels even when the native element paint contains alpha.
-    source = STREAM.Image.new("RGBA", (2, 1), (255, 0, 0, 128))
-    encoded = io.BytesIO()
-    source.save(encoded, "PNG")
+def native_packet(*frames: bytes) -> bytes:
+    packet = bytearray()
+    for index, frame in enumerate(frames):
+        packet.extend(b"RSE1")
+        packet.append(index == 0)
+        packet.extend(len(frame).to_bytes(4, "big"))
+        packet.extend((index * 16_666).to_bytes(8, "big"))
+        packet.extend((16_666).to_bytes(4, "big"))
+        packet.extend((1280).to_bytes(4, "big"))
+        packet.extend((720).to_bytes(4, "big"))
+        packet.extend(frame)
+    return bytes(packet)
 
-    result = STREAM.Image.frombytes(
-        "RGB", (4, 4), STREAM.fit_element_frame(encoded.getvalue(), 4, 4, "0000ff")
-    )
 
-    assert result.getpixel((0, 0)) == (0, 0, 255)
-    assert result.getpixel((1, 1)) == (128, 0, 127)
-    assert result.getpixel((2, 1)) == (128, 0, 127)
-    assert result.getpixel((2, 2)) == (0, 0, 255)
+def test_parse_native_frames_preserves_annex_b_payloads() -> None:
+    # The Python side relays only compressed NAL units; all paint, resize,
+    # alpha flattening, and encode work must have happened inside Gecko.
+    frames = [b"\0\0\0\1gSPS", b"\0\0\0\1eIDR"]
+
+    assert STREAM.parse_native_frames(native_packet(*frames)) == frames
+
+
+def test_parse_native_frames_rejects_truncated_payload() -> None:
+    with pytest.raises(ValueError, match="truncated"):
+        STREAM.parse_native_frames(native_packet(b"frame")[:-1])
 
 
 @pytest.mark.parametrize(

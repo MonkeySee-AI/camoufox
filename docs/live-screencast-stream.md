@@ -58,4 +58,5 @@ Element streams use the `/mjpeg` multipart endpoint automatically, but each fram
 
 `backdrop-filter` does not import or filter the original page backdrop; Gecko's content-side paint keeps the element's foreground but cannot reproduce that compositor-only effect. A root `mix-blend-mode` blends against transparency, while descendants can still blend with pixels inside the selected subtree. Including the original backdrop for either effect would reintroduce pixels outside the selection.
 
-For a fixed-size 60 fps H.264 proof of concept with hardware encoding and native browser video decode, see [Low-latency element video POC](low-latency-element-stream.md).
+For the native fixed-size H.264 path and its current platform support, see
+[Native selector video](element-video-stream.md).

@@ -903,20 +903,31 @@ export class PageHandler {
     await this._pageTarget.stopScreencast(options);
   }
 
-  async _startElementScreencast({frameId, objectId, fps = 25}) {
+  async _startElementScreencast({frameId, objectId, fps = 25, video = false,
+                                 width = 1280, height = 720, bitrate = 12000000}) {
     if (!frameId || !objectId)
       throw new Error('Element screencast requires frameId and objectId');
     if (this._elementScreencast)
       throw new Error('Screencast is already running');
     if (fps < 1 || fps > 60)
       throw new Error('Element screencast FPS must be between 1 and 60');
+    if (video && (width < 2 || height < 2 || width > 8192 || height > 8192 || width % 2 || height % 2))
+      throw new Error('Element video dimensions must be even and between 2 and 8192');
+    if (video && (bitrate < 1000 || bitrate > 500000000))
+      throw new Error('Element video bitrate must be between 1000 and 500000000');
 
-    await this._contentPage.send('startElementScreencast', {frameId, objectId});
+    await this._contentPage.send('startElementScreencast', {frameId, objectId, video});
     const state = {
       id: helper.generateId(),
       interval: 1000 / fps,
       timer: null,
       waitingForAck: false,
+      video,
+      width,
+      height,
+      fps,
+      bitrate,
+      frameIndex: 0,
     };
     this._elementScreencast = state;
     void this._captureElementScreencastFrame(state);
@@ -927,8 +938,14 @@ export class PageHandler {
     const started = Date.now();
     try {
       if (!state.waitingForAck) {
-        const {data} = await this._contentPage.send('captureElementScreencastFrame');
-        const size = pngSize(data);
+        const {data} = await this._contentPage.send('captureElementScreencastFrame', {
+          width: state.width,
+          height: state.height,
+          fps: state.fps,
+          bitrate: state.bitrate,
+          frameIndex: state.frameIndex++,
+        });
+        const size = state.video ? {width: state.width, height: state.height} : pngSize(data);
         if (this._elementScreencast !== state)
           return;
         state.waitingForAck = true;
