@@ -57,3 +57,5 @@ uv run scripts/stream-juggler-screencast.py \
 Element streams use the `/mjpeg` multipart endpoint automatically, but each frame is a transparent PNG. Juggler resolves the selector once, then asks Gecko to paint only that element's layout frame and descendants. Page pixels below the element are excluded; shadows and remote iframe descendants remain part of the selected subtree. Resizes therefore produce images at the element's current native ink-overflow dimensions, and ordinary offscreen elements are captured without scrolling the page.
 
 `backdrop-filter` does not import or filter the original page backdrop; Gecko's content-side paint keeps the element's foreground but cannot reproduce that compositor-only effect. A root `mix-blend-mode` blends against transparency, while descendants can still blend with pixels inside the selected subtree. Including the original backdrop for either effect would reintroduce pixels outside the selection.
+
+For a fixed-size 60 fps H.264 proof of concept with hardware encoding and native browser video decode, see [Low-latency element video POC](low-latency-element-stream.md).
