@@ -61,3 +61,12 @@ def test_selectorless_video_routes_around_element_paint() -> None:
     assert "video, fps, bitrate, codec" in registry
     assert "devicePixelRatio * viewport.width" in registry
     assert "devicePixelRatio * viewport.height" in registry
+
+
+def test_native_video_is_gated_to_macos_at_the_juggler_boundary() -> None:
+    # This sentinel protects the backend gate shared by selector and viewport
+    # video so direct Juggler clients cannot bypass Playwright's host check.
+    handler = HANDLER.read_text()
+
+    assert "options.video && AppConstants.platform !== 'macosx'" in handler
+    assert "Linux and Microsoft Windows are not supported yet" in handler

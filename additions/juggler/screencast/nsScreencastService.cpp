@@ -51,6 +51,9 @@ NS_IMPL_ISUPPORTS(nsScreencastService, nsIScreencastService)
 namespace {
 
 const uint32_t kMaxFramesInFlight = 1;
+// Live video favors current frames over a growing latency queue. The native
+// encoder can pipeline work, but capture stops at this bound until it catches
+// up.
 const uint32_t kMaxNativeFramesInFlight = 8;
 
 StaticRefPtr<nsScreencastService> gScreencastService;
@@ -168,12 +171,19 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
             }
             self->mNativeStream = std::move(aStream);
 #ifdef XP_MACOSX
+            // Headed macOS has a Core Animation NativeLayerRoot whose pixels
+            // can stay in IOSurfaces through VideoToolbox. Headless has no such
+            // root, so it deliberately leaves this unset for the CPU fallback
+            // in CaptureNativeFrame(). Removing the guard does not make the
+            // headless path GPU-backed.
             if (!gfxPlatform::IsHeadless()) {
               self->mNativeSnapshotter =
                   dom::CreateWindowVideoSnapshotter(self->mWidget);
             }
 #endif
             self->mNativeReady = true;
+            // Skip missed ticks instead of emitting a burst of stale frames:
+            // this is a realtime stream, not a lossless frame recorder.
             MOZ_ALWAYS_SUCCEEDS(NS_NewTimerWithFuncCallback(
                 getter_AddRefs(self->mNativeTimer),
                 [](nsITimer*, void* aClosure) {
@@ -219,6 +229,8 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
       mNativeTimer = nullptr;
     }
 #ifdef XP_MACOSX
+    // The snapshotter is created and used on the compositor thread; destroy it
+    // there too instead of releasing compositor-owned state on the main thread.
     if (mNativeSnapshotter) {
       UniquePtr<layers::NativeLayerRootSnapshotter> snapshotter =
           std::move(mNativeSnapshotter);
@@ -395,6 +407,8 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
       return;
 
 #ifdef XP_MACOSX
+    // Fast headed-macOS path: snapshot the compositor directly to an IOSurface
+    // and keep the frame GPU-shareable through color conversion and encoding.
     if (mNativeSnapshotter) {
       gfx::IntSize captureSize = widgetSize;
       gfx::IntPoint sourceOrigin(0, top);
@@ -440,6 +454,10 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     }
 #endif
 
+    // This compatibility path renders WebRender into CPU BGRA and copies the
+    // cropped rows. A 4K frame is roughly 32 MiB, so this preserves headless and
+    // cross-platform correctness but is not the 4K60 design. Replace it with a
+    // compositor-owned surface export when headless 4K60 is required.
     WindowRenderer* renderer = mWidget->GetWindowRenderer();
     layers::WebRenderLayerManager* layerManager =
         renderer ? renderer->AsWebRender() : nullptr;
@@ -498,6 +516,9 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
           self->mFramesInFlight.fetch_sub(1);
           if (self->mStopped || aPacket.IsEmpty())
             return;
+          // The current XPCOM/Juggler contract carries AString, so binary video
+          // packets require base64 and UTF-16 conversion. Change that contract
+          // to a byte channel before optimizing these copies independently.
           nsCString base64;
           if (NS_FAILED(Base64Encode(aPacket, base64)))
             return;

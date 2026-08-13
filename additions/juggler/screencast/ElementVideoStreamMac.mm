@@ -90,6 +90,9 @@ bool CompositeElementVideoSurface(const RefPtr<MacIOSurface>& aSource,
     CIRenderTask* task = [context startTaskToRender:image
                                       toDestination:destination
                                               error:&error];
+    // Encoding must not observe a partially rendered NV12 IOSurface. This wait
+    // is the current synchronization boundary; chain render completion into the
+    // encoder instead if profiling shows the blocking handoff is the bottleneck.
     return task && [task waitUntilCompletedAndReturnError:&error];
   }
 }

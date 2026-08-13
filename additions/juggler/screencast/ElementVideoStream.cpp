@@ -70,6 +70,10 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
     RefPtr<MacIOSurface>& aIOSurface
 #endif
 ) {
+  // Selector capture cannot reuse the whole-window compositor snapshot without
+  // exposing pixels outside the selected element. It therefore replays the
+  // element paint into a new surface. This is isolation-first and CPU-bound;
+  // high-resolution selector capture needs a compositor subtree export.
   RefPtr<gfx::RecordedDependentSurface> root = aFragments.Get(TabId(0));
   if (!root || root->mSize.IsEmpty()) {
     return Err(StreamError("Element paint did not produce a root surface"_ns));
@@ -182,6 +186,9 @@ Result<RefPtr<layers::Image>, MediaResult> RenderSurface(
   }
   aContentRect = gfx::IntRect(gfx::IntPoint(), aOutputSize);
 #ifdef XP_MACOSX
+  // The source arrived as CPU pixels (the headless viewport fallback). Stage it
+  // in an IOSurface so Core Image can produce the NV12 surface expected by the
+  // platform encoder; headed capture enters through RenderIOSurface instead.
   const gfx::IntSize sourceSize = aSource->GetSize();
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
       sourceSize.width, sourceSize.height, false);
@@ -394,6 +401,9 @@ void ElementVideoStream::EncodeNow(PendingEncode&& aEncode) {
   const gfx::IntSize size(mOptions.mWidth, mOptions.mHeight);
   gfx::IntRect contentRect;
 #ifdef XP_MACOSX
+  // An asynchronous platform encode retains its input surface. Pipelined frames
+  // therefore need distinct surfaces; a serial encoder can safely reuse
+  // mIOSurface. Introduce a bounded pool only if allocation appears in profiles.
   RefPtr<MacIOSurface> frameSurface;
   RefPtr<MacIOSurface>& surface = mPipelined ? frameSurface : mIOSurface;
 #endif

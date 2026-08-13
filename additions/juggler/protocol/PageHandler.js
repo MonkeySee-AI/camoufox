@@ -8,6 +8,7 @@ const {Helper, EventWatcher} = ChromeUtils.importESModule('chrome://juggler/cont
 const {NetUtil} = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const {NetworkObserver, PageNetwork} = ChromeUtils.importESModule('chrome://juggler/content/NetworkObserver.js');
 const {PageTarget} = ChromeUtils.importESModule('chrome://juggler/content/TargetRegistry.js');
+const {AppConstants} = ChromeUtils.importESModule('resource://gre/modules/AppConstants.sys.mjs');
 const {clearTimeout, setTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
 
 const Cc = Components.classes;
@@ -882,6 +883,11 @@ export class PageHandler {
   }
 
   async ['Page.startScreencast'](options) {
+    if (options.video && AppConstants.platform !== 'macosx')
+      throw new Error('Native video screencast is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.');
+    // Selector capture must paint in the content process to exclude surrounding
+    // pixels. Selectorless capture stays in the parent/compositor, which enables
+    // the headed-macOS IOSurface fast path.
     if (options.objectId || options.frameId)
       return await this._startElementScreencast(options);
     return await this._pageTarget.startScreencast(options);
@@ -948,6 +954,8 @@ export class PageHandler {
       state.nextFrameAt += state.interval;
       state.timer = setTimeout(() => void this._captureElementScreencastFrame(state),
                                Math.max(0, state.nextFrameAt - Date.now()));
+      // Bound live-video latency and memory. When encoding falls behind, skip
+      // capture requests rather than queueing frames that are already stale.
       if (state.capturesInFlight >= 8)
         return;
       state.capturesInFlight++;

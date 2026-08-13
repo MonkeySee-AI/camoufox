@@ -34,6 +34,8 @@ function patchPageDispatcher(dispatcherModule) {
   PageDispatcher.prototype.screencastStart = async function(params, progress) {
     if (!params.selector && !params.video)
       return await original.call(this, params, progress);
+    if (params.video && process.platform !== "darwin")
+      throw new Error("Native video screencast is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.");
     if (!params.sendFrames || params.record)
       throw new Error("Native video screencast only supports live frame streaming");
     if (this._screencastClient || this._videoRecorder || this._page.screencast._clients.size)

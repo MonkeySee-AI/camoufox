@@ -11,12 +11,13 @@ frame on a fixed canvas; PNG, Python image work, FFmpeg, and MSE are absent.
 | Platform | Working path | 4K60 target |
 | --- | --- | --- |
 | macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Implemented and measured at 4K60 headed and headless |
-| Windows | CPU `SourceSurfaceImage` into Media Foundation H.264 | D3D11 texture wrapped with `MFCreateDXGISurfaceBuffer` |
-| Linux | CPU `SourceSurfaceImage` into an available Gecko H.264 encoder | DMA-BUF imported by VAAPI/NVENC in RDD/GPU |
+| Microsoft Windows | Not currently supported | D3D11 texture wrapped with `MFCreateDXGISurfaceBuffer` |
+| Linux | Not currently supported | DMA-BUF imported by VAAPI/NVENC in RDD/GPU |
 
-The Windows and Linux fallback is real correctness code, not a 4K60 claim.
-Production should negotiate H.264, HEVC, VP9, or AV1 rather than assume every
-host and client share one hardware codec.
+Native video requests are rejected outside macOS by both the Playwright API and
+Rotunda's Juggler backend. We welcome contributions for Linux and Microsoft
+Windows; production support needs GPU-native frame transport and codec
+negotiation rather than relying on the current CPU fallback.
 
 Frames use a fixed even-sized canvas so resizes do not recreate the encoder.
 Selector recordings preserve their native size and center over opaque white.
