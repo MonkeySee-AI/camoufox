@@ -156,6 +156,7 @@ async def test_webrtc_selector_video_crops_in_real_browser(
               #target {
                 width: 160px; height: 90px; color: white;
                 background: rgba(0, 100, 255, .8);
+                box-shadow: 0 0 30px black;
               }
             </style>
             <div id="target">frame <span>0</span></div>

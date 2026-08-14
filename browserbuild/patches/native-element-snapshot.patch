@@ -897,25 +897,25 @@ index baa8899738..611abc62e7 100644
 +  }
 +  rootFrame = rootFrame->FirstContinuation();
 +
-+  nsRect inkOverflow;
-+  bool hasInk = false;
++  nsRect borderBox;
++  bool hasBorderBox = false;
 +  for (nsIFrame* frame = rootFrame; frame;
 +       frame = frame->GetNextContinuation()) {
-+    nsRect rect = frame->InkOverflowRect();
++    nsRect rect(nsPoint(), frame->GetSize());
 +    rect.MoveBy(frame->GetOffsetTo(rootFrame));
-+    if (hasInk) {
-+      inkOverflow.UnionRect(inkOverflow, rect);
++    if (hasBorderBox) {
++      borderBox.UnionRect(borderBox, rect);
 +    } else {
-+      inkOverflow = rect;
-+      hasInk = true;
++      borderBox = rect;
++      hasBorderBox = true;
 +    }
 +  }
-+  if (!hasInk || inkOverflow.IsEmpty()) {
++  if (!hasBorderBox || borderBox.IsEmpty()) {
 +    return PaintFragment{};
 +  }
 +
 +  RefPtr<nsPresContext> presContext = rootFrame->PresContext();
-+  CSSIntRect rect = RoundedOut(CSSPixel::FromAppUnits(inkOverflow));
++  CSSIntRect rect = RoundedOut(CSSPixel::FromAppUnits(borderBox));
 +  IntSize surfaceSize(int32_t(std::ceil(rect.width * aScale)),
 +                      int32_t(std::ceil(rect.height * aScale)));
 +  if (surfaceSize.IsEmpty() || !Factory::CheckSurfaceSize(surfaceSize)) {
