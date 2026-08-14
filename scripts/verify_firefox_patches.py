@@ -29,16 +29,18 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from _mixin import list_patches
+from _mixin import BROWSERBUILD_DIR as BROWSERBUILD_DIR_RAW, PATCHES_DIR as PATCHES_DIR_RAW, list_patches
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM_SH = REPO_ROOT / "upstream.sh"
-PATCHES_DIR = REPO_ROOT / "patches"
-ADDITIONS_DIR = REPO_ROOT / "additions"
-SETTINGS_DIR = REPO_ROOT / "settings"
-ASSETS_DIR = REPO_ROOT / "assets"
+BROWSERBUILD_DIR = Path(BROWSERBUILD_DIR_RAW)
+PATCHES_DIR = Path(PATCHES_DIR_RAW)
+ADDITIONS_DIR = BROWSERBUILD_DIR / "additions"
+SETTINGS_DIR = BROWSERBUILD_DIR / "settings"
+ASSETS_DIR = BROWSERBUILD_DIR / "assets"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+BROWSERBUILD_ADDITIONS_REPO_PREFIX = ("browserbuild", "additions")
 FIREFOX_TARBALL_URL = (
     "https://archive.mozilla.org/pub/firefox/releases/{version}/source/"
     "firefox-{version}.source.tar.xz"
@@ -610,9 +612,9 @@ class PatchVerifier:
 
         for repo_file in changed_repo_files:
             path = PurePosixPath(repo_file)
-            if path.parts[:1] != ("additions",):
+            if path.parts[:2] != BROWSERBUILD_ADDITIONS_REPO_PREFIX:
                 continue
-            relative_path = PurePosixPath(*path.parts[1:]).as_posix()
+            relative_path = PurePosixPath(*path.parts[2:]).as_posix()
             overlay_paths.append(relative_path)
             if Path(relative_path).suffix.lower() in SOURCE_EXTENSIONS and self.workspace_file(relative_path).is_file():
                 syntax_targets.append(relative_path)

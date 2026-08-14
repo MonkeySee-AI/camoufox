@@ -49,8 +49,10 @@ def runtime_probe(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> 
     if compiler is None:
         pytest.skip("No C++ compiler is available for runtime parity probe.")
 
+    # Compile the moved browser runtime sources into the probe used by the
+    # end-to-end native/Python parity checks below.
     binary = tmp_path_factory.mktemp("runtime-probe") / "runtime_probe"
-    runtime_dir = repo_root / "additions" / "rotundacfg"
+    runtime_dir = repo_root / "browserbuild" / "additions" / "rotundacfg"
     fixture_dir = repo_root / "__tests__" / "fixtures" / "cpp"
     command = [
         compiler,

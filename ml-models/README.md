@@ -226,12 +226,12 @@ uv run --package rotunda-models rotunda-models export-runtime \
   --final
 ```
 
-`--final` writes to `bundle/runtime-models/`, which the package targets copy
+`--final` writes to `browserbuild/bundle/runtime-models/`, which the package targets copy
 into the browser bundle when present.
 
 The command writes compact SafeTensors-compatible binary weight files plus a
 `runtime-models.json` manifest. Browser builds that include
-`bundle/runtime-models/` resolve these shipped artifacts automatically, so
+`browserbuild/bundle/runtime-models/` resolve these shipped artifacts automatically, so
 profiles only need to enable humanization:
 
 ```json

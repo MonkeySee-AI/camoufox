@@ -13,11 +13,13 @@ import hashlib
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 
 from _mixin import (
+    BROWSERBUILD_DIR,
     find_src_dir,
     get_moz_target,
     get_options,
@@ -79,12 +81,13 @@ class Patcher:
             else:
                 print("Skipping source reset: no local source git repo with unpatched tag.")
 
-            # Re-copy additions and settings after reset
-            print("Re-copying additions and settings...")
+            # Re-copy browser build additions and settings after reset
+            print("Re-copying browser build additions and settings...")
             run(f'bash ../scripts/copy-additions.sh {version} {release}')
 
             # Create the base mozconfig file
-            run('cp -v ../assets/base.mozconfig mozconfig')
+            base_mozconfig = os.path.join(BROWSERBUILD_DIR, "assets", "base.mozconfig")
+            run(f'cp -v {shlex.quote(base_mozconfig)} mozconfig')
             # Set cross building target
             print(f'Using target: {self.moz_target}')
             self._update_mozconfig()
@@ -177,7 +180,7 @@ class Patcher:
 
     def _update_mozconfig(self):
         """
-        Helper for adding additional mozconfig code from assets/<target>.mozconfig
+        Helper for adding additional mozconfig code from browserbuild/assets/<target>.mozconfig
         """
         mozconfig_backup = "mozconfig.backup"
         mozconfig = "mozconfig"
@@ -199,7 +202,7 @@ class Patcher:
         content += f"\nac_add_options --target={self.moz_target}\n"
 
         # Add target-specific mozconfig if it exists
-        target_mozconfig = os.path.join("..", "assets", f"{self.target}.mozconfig")
+        target_mozconfig = os.path.join(BROWSERBUILD_DIR, "assets", f"{self.target}.mozconfig")
         if os.path.exists(target_mozconfig):
             with open(target_mozconfig, 'r', encoding='utf-8') as f:
                 content += f.read()

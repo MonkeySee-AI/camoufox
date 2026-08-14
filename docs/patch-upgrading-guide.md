@@ -2,7 +2,7 @@
 
 This guide provides step-by-step instructions for updating Rotunda patches when upgrading Firefox versions. Patches frequently break due to Firefox API changes, file reorganizations, and line number shifts.
 
-**All patches are located in the `patches/` directory.** There are no separate context patches to merge—per-context functionality is already built into the patches.
+**All patches are located in the `browserbuild/patches/` directory.** There are no separate context patches to merge—per-context functionality is already built into the patches.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ This guide provides step-by-step instructions for updating Rotunda patches when 
 
 ### Patch Categories
 
-All Rotunda patches are in the `patches/` directory:
+All Rotunda patches are in the `browserbuild/patches/` directory:
 
 - **Core Patches**: `0-playwright.patch`, `1-leak-fixes.patch`, etc.
 - **Feature Patches**: `webrtc-ip-spoofing.patch`, `anti-font-fingerprinting.patch`, etc.
@@ -53,7 +53,7 @@ make clean
 Check which patches exist:
 
 ```bash
-ls patches/*.patch
+find browserbuild/patches -name '*.patch'
 ```
 
 ### 3. Understand Patch Dependencies
@@ -70,7 +70,7 @@ Some patches depend on others being applied first:
 
 ```bash
 cd rotunda-<version>
-patch -p1 < ../patches/patch-name.patch
+patch -p1 < ../browserbuild/patches/patch-name.patch
 ```
 
 Find reject files:
@@ -123,8 +123,8 @@ git add new/file.cpp new/file.h
 git diff --cached --binary > /tmp/patch-name.patch
 git diff --binary >> /tmp/patch-name.patch
 
-# Copy to patches directory
-cp /tmp/patch-name.patch ../patches/patch-name.patch
+# Copy to the browserbuild patches directory
+cp /tmp/patch-name.patch ../browserbuild/patches/patch-name.patch
 ```
 
 ### Step 7: Verify Patch Applies Cleanly
@@ -133,7 +133,7 @@ cp /tmp/patch-name.patch ../patches/patch-name.patch
 cd ..
 make clean
 cd rotunda-<version>
-patch -p1 < ../patches/patch-name.patch
+patch -p1 < ../browserbuild/patches/patch-name.patch
 find . -name '*.rej' -type f  # Should return nothing
 ```
 
@@ -287,7 +287,7 @@ Simply apply the patch manually at the correct line number. The code hasn't chan
 
 ## Context Patch Merging (Historical - Not Applicable for Future Updates)
 
-**NOTE**: As of Firefox 146, all context patches have been merged into their base patches. This section is kept for historical reference and understanding how the patches evolved. Future Firefox updates will only need to update patches in the `patches/` directory.
+**NOTE**: As of Firefox 146, all context patches have been merged into their base patches. This section is kept for historical reference and understanding how the patches evolved. Future Firefox updates will only need to update patches in the `browserbuild/patches/` directory.
 
 ---
 
@@ -309,7 +309,7 @@ Merge all changes from `*.context.patch` into the corresponding base patch so th
 2. **Apply base patch first**:
    ```bash
    cd rotunda-<version>
-   patch -p1 < ../patches/anti-font-fingerprinting.patch
+   patch -p1 < ../browserbuild/patches/anti-font-fingerprinting.patch
    ```
 
 3. **Apply context patch on top**:
@@ -332,7 +332,7 @@ Merge all changes from `*.context.patch` into the corresponding base patch so th
    git diff --binary >> /tmp/anti-font-fingerprinting.patch
 
    # Replace base patch
-   cp /tmp/anti-font-fingerprinting.patch ../patches/anti-font-fingerprinting.patch
+   cp /tmp/anti-font-fingerprinting.patch ../browserbuild/patches/anti-font-fingerprinting.patch
    ```
 
 6. **Verify combined patch**:
@@ -340,7 +340,7 @@ Merge all changes from `*.context.patch` into the corresponding base patch so th
    cd ..
    make clean
    cd rotunda-<version>
-   patch -p1 < ../patches/anti-font-fingerprinting.patch
+   patch -p1 < ../browserbuild/patches/anti-font-fingerprinting.patch
    find . -name '*.rej' -type f  # Should be empty
    ```
 
@@ -379,7 +379,7 @@ After updating a patch, always verify:
    ```bash
    make clean
    cd rotunda-<version>
-   patch -p1 < ../patches/patch-name.patch
+   patch -p1 < ../browserbuild/patches/patch-name.patch
    find . -name '*.rej' -type f
    ```
 
@@ -439,7 +439,7 @@ Here's a complete example of updating `0-playwright.patch` from Firefox 144 to F
 ```bash
 make clean
 cd rotunda-146.0.1-beta.25
-patch -p1 < ../patches/0-playwright.patch
+patch -p1 < ../browserbuild/patches/playwright/0-playwright.patch
 ```
 
 ### 2. Find Rejects
@@ -481,7 +481,7 @@ find . -name '*.rej' -type f  # Verify empty
 
 ```bash
 git diff --binary > /tmp/0-playwright.patch
-cp /tmp/0-playwright.patch ../patches/0-playwright.patch
+cp /tmp/0-playwright.patch ../browserbuild/patches/playwright/0-playwright.patch
 ```
 
 ### 9. Verify
@@ -490,7 +490,7 @@ cp /tmp/0-playwright.patch ../patches/0-playwright.patch
 cd ..
 make clean
 cd rotunda-146.0.1-beta.25
-patch -p1 < ../patches/0-playwright.patch
+patch -p1 < ../browserbuild/patches/playwright/0-playwright.patch
 find . -name '*.rej' -type f  # Should be empty
 ```
 

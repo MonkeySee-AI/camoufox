@@ -8,7 +8,12 @@ import re
 import sys
 import easygui
 
-from _mixin import find_src_dir, is_bootstrap_patch, list_patches, patch, run, temp_cd
+from _mixin import PATCHES_DIR, find_src_dir, is_bootstrap_patch, list_patches, patch, run, temp_cd
+
+
+def patch_display_name(patch_file):
+    """Return a stable patch name relative to browserbuild/patches."""
+    return os.path.relpath(patch_file, PATCHES_DIR).replace(os.sep, '/')
 
 
 def into_rotunda_dir():
@@ -47,8 +52,7 @@ def run_patches(reverse=False):
                 status = "NOT APPLIED"
             else:
                 status = "UNKNOWN"
-        # Format the display string (remove the '../patches/' prefix)
-        display_name = f"[{status}] {patch_file[len('../patches/'):].strip()}"
+        display_name = f"[{status}] {patch_display_name(patch_file)}"
         display_choices.append(display_name)
         mapping[display_name] = patch_file
 
@@ -118,7 +122,7 @@ def open_patch_workspace(selected_patch, stop_at_patch=False):
     def msg_format_paths(file_list):
         message = ''
         for patch_file in file_list:
-            message += '> ' + patch_file[len('../patches/') :] + '\n'
+            message += '> ' + patch_display_name(patch_file) + '\n'
         return message
 
     # Show which patches were applied if not all patches were allowed
@@ -229,7 +233,7 @@ def handle_choice(choice):
                 '\n'.join(
                     sorted(
                         (
-                            f'{v}\t{k[len("../patches/"):-len(".patch")]}'
+                            f'{v}\t{patch_display_name(k)[:-len(".patch")]}'
                             for k, v in apply_dict.items()
                         ),
                         reverse=True,
@@ -285,12 +289,12 @@ def handle_choice(choice):
             # Display message
             message = "Some patches failed to apply:\n\n"
             for patch_file, rejects in broken_patches:
-                message += '> ' + patch_file[len('../patches/') :] + '\n'
+                message += '> ' + patch_display_name(patch_file) + '\n'
             message += '\n\n\n'
 
             # Show file contents
             for patch_file, rejects in broken_patches:
-                message += f"Patch: {patch_file[len('../patches/'):]}\nRejects:\n"
+                message += f"Patch: {patch_display_name(patch_file)}\nRejects:\n"
                 for reject in rejects:
                     with open(reject, 'r') as f:
                         count = len(re.findall('^@@.*', f.read(), re.MULTILINE))
@@ -315,7 +319,7 @@ def handle_choice(choice):
                         status = "NOT APPLIED"
                     else:
                         status = "UNKNOWN"
-                display_name = f"{n+1}. [{status}] {file_name[len('../patches/'):]}".strip()
+                display_name = f"{n+1}. [{status}] {patch_display_name(file_name)}".strip()
                 ui_choices.append(display_name)
             
             selected_patch = easygui.choicebox(
@@ -340,7 +344,7 @@ def handle_choice(choice):
 
         case "Write workspace to patch":
             # Open a file dialog to select a file to write the diff to
-            with temp_cd('../patches'):
+            with temp_cd(PATCHES_DIR):
                 file_path = easygui.filesavebox(
                     "Select a file to write the patch to",
                     "Write Patch",

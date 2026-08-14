@@ -211,9 +211,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh', 'assets/base.mozconfig') }}-${{ github.sha }}
+          key: ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh', 'browserbuild/assets/base.mozconfig') }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh', 'assets/base.mozconfig') }}-
+            ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh', 'browserbuild/assets/base.mozconfig') }}-
 
       - name: Configure ccache
         run: |

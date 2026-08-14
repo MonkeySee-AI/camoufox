@@ -11,11 +11,11 @@ deliberately not pinned here; refactors should not fight this file.
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-HANDLER = ROOT / "additions/juggler/protocol/PageHandler.js"
-MOZ_BUILD = ROOT / "additions/juggler/screencast/moz.build"
-ELEMENT_PATCH = ROOT / "patches/native-element-snapshot.patch"
-IOSURFACE_PATCH = ROOT / "patches/native-viewport-iosurface.patch"
-STRIDE_PATCH = ROOT / "patches/webrender-snapshot-stride.patch"
+HANDLER = ROOT / "browserbuild/additions/juggler/protocol/PageHandler.js"
+MOZ_BUILD = ROOT / "browserbuild/additions/juggler/screencast/moz.build"
+ELEMENT_PATCH = ROOT / "browserbuild/patches/native-element-snapshot.patch"
+IOSURFACE_PATCH = ROOT / "browserbuild/patches/native-viewport-iosurface.patch"
+STRIDE_PATCH = ROOT / "browserbuild/patches/webrender-snapshot-stride.patch"
 
 
 def test_native_video_is_gated_to_macos_at_the_juggler_boundary() -> None:

@@ -211,7 +211,7 @@ if (BrowsingContext* bc = win->GetBrowsingContext()) {
 
 Workers resolve `userContextId` via `WorkerPrivate::GetOriginAttributes()`, which inherits from the creating context's BrowsingContext.
 
-### Configuration (`settings/rotunda.cfg`)
+### Configuration (`browserbuild/settings/rotunda.cfg`)
 
 The `rotunda.cfg` file sets Firefox preferences at startup (before `prefs.js` is loaded). Key settings:
 
@@ -554,7 +554,7 @@ For per-context geolocation, use Playwright's built-in `context.setGeolocation()
 
 **Patch independence:** All patches apply independently to vanilla Firefox. Context lines in hunks reference unpatched source files. Patches apply alphabetically and use fuzzy matching for line shifts caused by other patches.
 
-**rotunda.cfg:** The `settings/rotunda.cfg` file sets `fission.autostart=true`, `fission.webContentIsolationStrategy=1`, and `dom.ipc.processPrelaunch.enabled=false`. No `dom.ipc.processCount` override is needed — the cross-process storage patch enables all per-context values to sync across Firefox's default multi-process architecture.
+**rotunda.cfg:** The `browserbuild/settings/rotunda.cfg` file sets `fission.autostart=true`, `fission.webContentIsolationStrategy=1`, and `dom.ipc.processPrelaunch.enabled=false`. No `dom.ipc.processCount` override is needed — the cross-process storage patch enables all per-context values to sync across Firefox's default multi-process architecture.
 
 ---
 
@@ -562,10 +562,10 @@ For per-context geolocation, use Playwright's built-in `context.setGeolocation()
 
 Rotunda bundles OS-specific fontconfig configurations and font files so that font rendering and font detection produce OS-consistent results, regardless of the host system's installed fonts.
 
-**Directory structure** (in `bundle/`, packaged via Makefile `--includes`):
+**Directory structure** (in `browserbuild/bundle/`, packaged via Makefile `--includes`):
 
 ```
-bundle/
+browserbuild/bundle/
 ├── fontconfig/
 │   ├── macos/fonts.conf    ← sans-serif→Helvetica, monospace→Menlo, cursive→Apple Chancery
 │   ├── linux/fonts.conf    ← sans-serif→Arimo, monospace→Cousine
