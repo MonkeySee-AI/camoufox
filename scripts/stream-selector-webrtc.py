@@ -332,7 +332,7 @@ const pc=new RTCPeerConnection({{iceServers:{json.dumps(ice_servers)}}});
 window.__webrtc={{connectionState:'new'}};window.__webrtcSamples=[];
 // The RSE2 crop rectangle arrives on the metadata data channel; present only
 // that region of the fixed decoder canvas, shrink-wrapped to the viewport.
-window.__crop=null;
+window.__crop=null;window.__cropHistory=[];
 function layout(){{
   const W=video.videoWidth,H=video.videoHeight;
   if(!W||!H)return;
@@ -347,7 +347,7 @@ const metadata=pc.createDataChannel('metadata');
 metadata.onmessage=message=>{{
   try{{
     const data=JSON.parse(message.data);
-    if(data.type==='crop'&&data.width&&data.height){{window.__crop=data;layout();}}
+    if(data.type==='crop'&&data.width&&data.height){{window.__crop=data;window.__cropHistory.push(data);layout();}}
   }}catch(error){{}}
 }};
 new ResizeObserver(layout).observe(stage);

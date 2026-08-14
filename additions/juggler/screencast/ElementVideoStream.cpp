@@ -38,9 +38,9 @@ MediaResult StreamError(const nsACString& aMessage) {
 
 // The output canvas is modeled as an up-to-kMaxRasterScale× HiDPI raster of a
 // kLogicalWidth×kLogicalHeight logical viewport: elements are fitted in
-// logical space, then rastered at the canvas's pixel density. Client viewers
-// re-derive rasterScale from the canvas size with the same formula; keep the
-// constants in sync (see the RSE2 consumers in scripts/stream-selector-*.py).
+// logical space, then rastered at the canvas's pixel density. Clients do not
+// re-derive these constants; they present the region the RSE2 crop rectangle
+// describes (see scripts/stream-selector-webrtc.py).
 constexpr double kLogicalWidth = 1280.0;
 constexpr double kLogicalHeight = 720.0;
 constexpr double kMaxRasterScale = 2.0;

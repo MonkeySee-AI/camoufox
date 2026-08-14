@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import importlib.util
-import io
 from pathlib import Path
 
 import pytest
-from PIL import Image
 from playwright.async_api import Page, Playwright
 from rotunda.screencast import normalize_frame_data, start_screencast
 from tests.server import Server
@@ -23,25 +22,67 @@ def load_script(name: str, filename: str):
     return module
 
 
-# The low-latency viewer server and packet stream remain script-only helpers.
-VIDEO = load_script("stream_selector_low_latency", "stream-selector-low-latency.py")
+# The WebRTC bridge and viewer remain script-only; the test drives the same
+# client that production embeds.
+WEBRTC = load_script("stream_selector_webrtc", "stream-selector-webrtc.py")
+
+SAMPLE_VIDEO_PIXEL = """([x, y]) => {
+  const video = document.querySelector('video');
+  const canvas = new OffscreenCanvas(video.videoWidth, video.videoHeight);
+  const context = canvas.getContext('2d');
+  context.drawImage(video, 0, 0);
+  return [...context.getImageData(x, y, 1, 1).data];
+}"""
 
 
-async def test_low_latency_selector_video_decodes_in_real_browser(
-    page: Page, playwright: Playwright
-) -> None:
-    # This crosses every runtime boundary in the POC: native selector paint,
-    # native encoding, chunked HTTP, WebCodecs, and browser canvas presentation.
-    packets = VIDEO.NativePacketStream()
-    _, codec = VIDEO.h264_level(320, 180)
-    server = VIDEO.start_viewer_server("127.0.0.1", 0, packets, codec)
+def bridge_args(codec: str = "h264") -> argparse.Namespace:
+    return argparse.Namespace(
+        codec=codec,
+        jitter_buffer_ms=50,
+        host="127.0.0.1",
+        port=0,
+        ice_server=[],
+        ice_username=None,
+        ice_credential=None,
+        cert_file=None,
+        key_file=None,
+    )
+
+
+@contextlib.asynccontextmanager
+async def webrtc_viewer(playwright: Playwright, viewport: dict[str, int]):
+    state: dict[str, object] = {
+        "offer_lock": asyncio.Lock(),
+        "pc": None,
+        "track": None,
+    }
+    runner, viewer_url = await WEBRTC.start_server(bridge_args(), state)
     try:
         chrome = await playwright.chromium.launch(channel="chrome", headless=True)
     except Exception as error:
-        pytest.skip(f"Chrome is unavailable for H.264 POC verification: {error}")
-    viewer = await chrome.new_page(viewport={"width": 320, "height": 180})
-
+        await runner.cleanup()
+        pytest.skip(f"Chrome is unavailable for WebRTC verification: {error}")
+    viewer = await chrome.new_page(viewport=viewport)
     try:
+        yield state, viewer, viewer_url
+    finally:
+        if pc := state.get("pc"):
+            with contextlib.suppress(Exception):
+                await pc.close()
+        await runner.cleanup()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(chrome.close(), timeout=5)
+
+
+async def test_webrtc_selector_video_crops_in_real_browser(
+    page: Page, playwright: Playwright
+) -> None:
+    # This crosses every runtime boundary of the shipped path: native selector
+    # paint, native encoding, RTP/SRTP, browser decode, and crop shrink-wrap
+    # over the metadata data channel.
+    async with webrtc_viewer(
+        playwright, viewport={"width": 320, "height": 180}
+    ) as (state, viewer, viewer_url):
         # A changing translucent element ensures native paint and platform
         # encoding feed the live stream rather than a synthetic fixture.
         await page.set_content(
@@ -68,7 +109,8 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
         )
 
         def on_frame(frame: dict[str, object]) -> None:
-            packets.update(normalize_frame_data(frame["data"]))
+            if track := state.get("track"):
+                track.push(normalize_frame_data(frame["data"]))
 
         await start_screencast(
             page,
@@ -79,78 +121,54 @@ async def test_low_latency_selector_video_decodes_in_real_browser(
             fps=30,
             video=True,
             bitrate=2_000_000,
+            codec="h264",
         )
-        host, port = server.server_address[:2]
-        await viewer.goto(f"http://{host}:{port}/")
-        await viewer.evaluate(
-            """() => {
-              window.__observedContentSizes = [];
-              new ResizeObserver(([entry]) => {
-                const {width, height} = entry.contentRect;
-                window.__observedContentSizes.push([width, height]);
-              }).observe(document.querySelector('canvas'));
-            }"""
-        )
-        supported = await viewer.evaluate(
-            f"VideoDecoder.isConfigSupported({{codec: '{codec}'}}).then(r => r.supported)"
-        )
-        if not supported:
-            pytest.skip(f"browser does not support {codec} through WebCodecs")
+        await viewer.goto(viewer_url)
 
-        # Decoded frames, fixed stream dimensions, and two observed canvas sizes
-        # prove that real crop metadata shrink-wraps the changing DOM element.
+        # Fixed stream dimensions plus both element sizes in the crop history
+        # prove real crop metadata shrink-wraps the changing DOM element.
         try:
             await viewer.wait_for_function(
-                """() => window.__decodedFrames >= 10 &&
-                         window.__streamWidth === 320 &&
-                         window.__streamHeight === 180 &&
-                         window.__observedContentSizes.some(([w, h]) => Math.abs(w-160) <= 1 && Math.abs(h-90) <= 1) &&
-                         window.__observedContentSizes.some(([w, h]) => Math.abs(w-200) <= 1 && Math.abs(h-110) <= 1)""",
+                """() => {
+                  const video = document.querySelector('video');
+                  const near = (crop, w, h) =>
+                    Math.abs(crop.width - w) <= 1 && Math.abs(crop.height - h) <= 1;
+                  return (window.__webrtc.framesDecoded || 0) >= 10 &&
+                         video.videoWidth === 320 && video.videoHeight === 180 &&
+                         window.__cropHistory.some(crop => near(crop, 160, 90)) &&
+                         window.__cropHistory.some(crop => near(crop, 200, 110));
+                }""",
                 timeout=15_000,
             )
         except Exception as error:
-            state = await viewer.evaluate(
+            diagnostics = await viewer.evaluate(
                 """() => ({
-                  decoded: window.__decodedFrames,
-                  error: window.__decoderError,
-                  stream: [window.__streamWidth, window.__streamHeight],
-                  content: [window.__contentWidth, window.__contentHeight],
-                  observed: window.__observedContentSizes,
+                  stats: window.__webrtc,
+                  crop: window.__crop,
+                  history: window.__cropHistory,
                 })"""
             )
-            raise AssertionError(f"selector crop did not resize: {state}") from error
+            raise AssertionError(f"selector crop did not resize: {diagnostics}") from error
 
-        # The current crop contains element pixels rather than an empty canvas;
-        # its geometry must be one of the two source sizes, not the video size.
-        screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
-        blue = [
-            (x, y)
-            for y in range(screenshot.height)
-            for x in range(screenshot.width)
-            if (pixel := screenshot.getpixel((x, y)))[2] > 140
-            and pixel[1] > 40
-            and pixel[0] < 80
-        ]
-        left, top = map(min, zip(*blue))
-        right, bottom = map(max, zip(*blue))
-        painted_size = (right - left + 1, bottom - top + 1)
-        assert 100 <= painted_size[0] <= 220, painted_size
-        assert 50 <= painted_size[1] <= 130, painted_size
-    finally:
+        # The crop region contains element pixels, not matte: sample the
+        # decoded video inside the current crop.
+        crop = await viewer.evaluate("() => window.__crop")
+        pixel = await viewer.evaluate(
+            SAMPLE_VIDEO_PIXEL,
+            [crop["x"] + crop["width"] // 2, crop["y"] + crop["height"] // 2],
+        )
+        assert pixel[2] > 140 and pixel[0] < 80, pixel
+
         with contextlib.suppress(Exception):
             await page.screencast.stop()
-        packets.close()
-        server.shutdown()
-        server.server_close()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(chrome.close(), timeout=5)
 
 
-async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
+async def test_webrtc_viewport_video_fills_canvas_and_resolves_iframe(
     page: Page, playwright: Playwright, server: Server
 ) -> None:
     # This selector-less request must paint only the visible viewport, resolve
-    # a remote iframe, upscale it natively, and arrive as decodable video.
+    # a remote iframe, upscale it natively, and arrive as decodable video with
+    # a full-canvas crop.
     server.set_route(
         "/viewport-video-child.html",
         lambda request: (
@@ -175,20 +193,12 @@ async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
     await page.goto(server.PREFIX + "/viewport-video-parent.html")
     await page.frames[1].wait_for_load_state()
 
-    packets = VIDEO.NativePacketStream()
-    _, codec = VIDEO.h264_level(640, 360)
-    stream_server = VIDEO.start_viewer_server("127.0.0.1", 0, packets, codec)
-    try:
-        chrome = await playwright.chromium.launch(channel="chrome", headless=True)
-    except Exception as error:
-        stream_server.shutdown()
-        stream_server.server_close()
-        pytest.skip(f"Chrome is unavailable for H.264 POC verification: {error}")
-    viewer = await chrome.new_page(viewport={"width": 640, "height": 360})
-
-    try:
+    async with webrtc_viewer(
+        playwright, viewport={"width": 640, "height": 360}
+    ) as (state, viewer, viewer_url):
         def on_frame(frame: dict[str, object]) -> None:
-            packets.update(normalize_frame_data(frame["data"]))
+            if track := state.get("track"):
+                track.push(normalize_frame_data(frame["data"]))
 
         await start_screencast(
             page,
@@ -198,52 +208,44 @@ async def test_low_latency_viewport_video_fills_canvas_and_resolves_iframe(
             fps=30,
             video=True,
             bitrate=3_000_000,
+            codec="h264",
         )
-        host, port = stream_server.server_address[:2]
-        await viewer.goto(f"http://{host}:{port}/")
+        await viewer.goto(viewer_url)
 
-        # Full crop geometry proves the 320x180 viewport was replayed at 2x
+        # A full-canvas crop proves the 320x180 viewport was replayed at 2x
         # rather than centered at its source dimensions like an element.
         try:
             await viewer.wait_for_function(
-                """() => window.__decodedFrames >= 10 &&
-                         window.__streamWidth === 640 &&
-                         window.__streamHeight === 360 &&
-                         window.__contentWidth === 640 &&
-                         window.__contentHeight === 360""",
+                """() => {
+                  const video = document.querySelector('video');
+                  return (window.__webrtc.framesDecoded || 0) >= 10 &&
+                         video.videoWidth === 640 && video.videoHeight === 360 &&
+                         window.__crop && window.__crop.width === 640 &&
+                         window.__crop.height === 360;
+                }""",
                 timeout=15_000,
             )
         except Exception as error:
-            state = await viewer.evaluate(
-                """() => ({
-                  decoded: window.__decodedFrames,
-                  error: window.__decoderError,
-                  stream: [window.__streamWidth, window.__streamHeight],
-                  content: [window.__contentWidth, window.__contentHeight],
-                })"""
+            diagnostics = await viewer.evaluate(
+                "() => ({stats: window.__webrtc, crop: window.__crop})"
             )
-            state["source"] = await page.evaluate(
+            diagnostics["source"] = await page.evaluate(
                 """() => ({
                   inner: [innerWidth, innerHeight],
                   client: [document.documentElement.clientWidth,
                            document.documentElement.clientHeight],
                 })"""
             )
-            raise AssertionError(f"viewport video did not fill output: {state}") from error
-        screenshot = Image.open(io.BytesIO(await viewer.screenshot())).convert("RGB")
+            raise AssertionError(f"viewport video did not fill output: {diagnostics}") from error
 
         # Parent blue and remote-frame green must both survive the native
         # compositor snapshot; the offscreen yellow block must not appear.
-        blue = screenshot.getpixel((500, 300))
-        green = screenshot.getpixel((240, 160))
+        blue = await viewer.evaluate(SAMPLE_VIDEO_PIXEL, [500, 300])
+        green = await viewer.evaluate(SAMPLE_VIDEO_PIXEL, [240, 160])
+        left = await viewer.evaluate(SAMPLE_VIDEO_PIXEL, [50, 300])
         assert blue[2] > 120 and blue[0] < 70 and blue[1] < 80, blue
         assert green[1] > 180 and green[1] - max(green[0], green[2]) > 100, green
-        assert screenshot.getpixel((50, 300))[2] > 120
-    finally:
+        assert left[2] > 120, left
+
         with contextlib.suppress(Exception):
             await page.screencast.stop()
-        packets.close()
-        stream_server.shutdown()
-        stream_server.server_close()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(chrome.close(), timeout=5)

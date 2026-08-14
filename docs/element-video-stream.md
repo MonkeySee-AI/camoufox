@@ -4,16 +4,15 @@ Viewport and selector streams share one encoder pipeline:
 
 `WebRender compositor readback / element paint recording → fixed native video surface → Gecko PEMFactory → Annex B`
 
-Juggler transports compressed packets with their native timestamps. Two
-clients consume them; PNG, Python image work, FFmpeg, and MSE are absent:
-
-- `scripts/stream-selector-webrtc.py` — the primary client. Repacketizes the
-  Annex B stream as RTP/SRTP and serves a WebRTC viewer page, for embedding a
-  live browser preview in another web application. The RSE2 crop rectangle
-  rides a `metadata` data channel so the viewer presents only the selected
-  element's region of the fixed decoder canvas.
-- `scripts/stream-selector-low-latency.py` — chunked-HTTP/WebCodecs client;
-  the integration-test harness and local benchmark.
+Juggler transports compressed packets with their native timestamps. One
+client consumes them — `scripts/stream-selector-webrtc.py` — which
+repacketizes the Annex B stream as RTP/SRTP and serves a WebRTC viewer page,
+for embedding a live browser preview in another web application. WebRTC
+supplies the jitter buffering, retransmission, and bandwidth adaptation a
+real network needs; PNG, Python image work, FFmpeg, and MSE are absent. The
+RSE2 crop rectangle rides a `metadata` data channel so the viewer presents
+only the selected element's region of the fixed decoder canvas. The same
+bridge and viewer serve as the integration-test harness and local benchmark.
 
 | Platform | Working path | 4K60 target |
 | --- | --- | --- |
@@ -66,12 +65,10 @@ uv run --project . --package rotunda-tests --group playwright-tests \
   __tests__/playwright/async/test_element_stream_video.py
 
 python3 -m http.server 8765 &  # serves scripts/resizing-element-stream-demo.html
-uv run scripts/stream-selector-low-latency.py \
+uv run scripts/stream-selector-webrtc.py \
   --url http://127.0.0.1:8765/scripts/resizing-element-stream-demo.html \
   --video-size 3840x2160 --fps 60 --bitrate-mbps 35 \
   --benchmark-seconds 15 --verify-client
 ```
 
 Add `--selector '#stream-target'` to stream only that DOM subtree instead.
-`scripts/stream-selector-webrtc.py` takes the same driving options and serves
-the WebRTC viewer instead of the chunked-HTTP one.
