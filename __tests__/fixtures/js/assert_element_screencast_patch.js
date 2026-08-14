@@ -38,21 +38,26 @@ if (!String(PageDispatcher.prototype.videoStreamStart).includes('session.send("P
 if (!String(PageDispatcher.prototype.videoStreamStop).includes('session.send("Page.stopVideoStream"'))
   throw new Error("missing video stream stop dispatcher path");
 
-async function assertPlatformGate() {
+async function assertRemoteBackendOwnsCapabilityCheck() {
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", {...platform, value: "linux"});
   try {
-    await PageDispatcher.prototype.videoStreamStart.call({}, {});
-    throw new Error("native video streaming unexpectedly allowed Linux");
-  } catch (error) {
-    if (!String(error).includes("supported only on macOS"))
-      throw error;
+    let sent;
+    const dispatcher = {
+      _page: {
+        delegate: {_session: {send: async (method, options) => sent = {method, options}}},
+        screencast: {_clients: new Set()},
+      },
+    };
+    await PageDispatcher.prototype.videoStreamStart.call(dispatcher, {}, {});
+    if (sent?.method !== "Page.startVideoStream")
+      throw new Error("bridge platform blocked the remote browser capability check");
   } finally {
     Object.defineProperty(process, "platform", platform);
   }
 }
 
-assertPlatformGate().catch(error => {
+assertRemoteBackendOwnsCapabilityCheck().catch(error => {
   console.error(error);
   process.exitCode = 1;
 });
