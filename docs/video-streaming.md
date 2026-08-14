@@ -1,18 +1,23 @@
 # Video streaming
 
-Rotunda's native video streaming is for applications that need a real-time view
-of browser content at up to near-60 fps in 4K. Normal Playwright APIs expose
-screenshots and file-oriented video recording, not a low-latency stream of
-hardware-encoded frames. Stock automation browsers likewise do not provide a
-direct compositor-to-encoder path, so screenshot loops and image screencasts
-cannot deliver the same combination of resolution, frame rate, and latency.
+Sometimes you need to stream browser content for debugging or let a user watch
+and interact with a live browser session. These streams need high visual
+quality and high frame rates: a lagging, blurry, or jerky browser is difficult
+to debug and gives users a poor experience.
 
-Rotunda adds that path to the browser. It can stream a page viewport or one DOM
-element as native H.264 or H.265 video without an intermediate PNG/JPEG encode
-or a client-side re-encode. Rotunda owns capture and encoding; your client owns
-transport, playback, and viewer access. Actual throughput depends on output
-size, capture mode, machine, and load; the architecture is designed to approach
-4K60 on the headed macOS compositor path.
+Existing browser automation interfaces are not built for this. Normal
+Playwright APIs expose screenshots and file-oriented video recording, not a
+low-latency stream of hardware-encoded frames. Stock automation browsers also
+lack a direct compositor-to-encoder path, leaving clients to use screenshot
+loops or image screencasts that trade resolution and frame rate for latency.
+
+Rotunda introduces native video streaming for applications that need real-time
+browser content at up to near-60 fps in 4K. It can stream a page viewport or one
+DOM element as native H.264 or H.265 video without an intermediate PNG/JPEG
+encode or client-side re-encode. Rotunda owns capture and encoding; your client
+owns transport, playback, and viewer access. Actual throughput depends on
+output size, capture mode, machine, and load; the architecture is designed to
+approach 4K60 on the headed macOS compositor path.
 
 Native video streaming currently requires macOS. For the older image-based
 screencast path and an HLS player example, see [Live Screencast Stream](live-screencast-stream.md).
