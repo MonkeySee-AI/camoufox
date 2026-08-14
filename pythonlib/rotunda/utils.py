@@ -56,8 +56,16 @@ CACHE_PREFS = {
     "browser.cache.disk.smart_size.enabled": True,
     "browser.cache.disk_cache_ssl": True,
     "browser.cache.memory.enable": True,
-    "browser.sessionhistory.max_entries": 10,
     "browser.sessionhistory.max_total_viewers": -1,
+}
+
+# The browser ships defaultPref("browser.sessionhistory.max_entries", 0) in
+# rotunda.cfg, which disables session history entirely: back/forward stay
+# greyed out and page.go_back()/go_forward() are no-ops. Restore the Firefox
+# default as a user pref for every launch; bfcache stays governed separately
+# by browser.sessionhistory.max_total_viewers.
+SESSION_HISTORY_PREFS = {
+    "browser.sessionhistory.max_entries": 50,
 }
 
 MACOS_BACKGROUND_WINDOWS_ENV = ROTUNDA_MACOS_BACKGROUND_WINDOWS
@@ -745,6 +753,7 @@ class LaunchOptionBuilder:
         firefox_user_prefs = self._firefox_prefs()
 
         _merge_missing(firefox_user_prefs, STEALTH_PREFS)
+        _merge_missing(firefox_user_prefs, SESSION_HISTORY_PREFS)
 
         do_not_track = config.navigator.do_not_track if config.navigator else None
         if hasattr(do_not_track, "value"):

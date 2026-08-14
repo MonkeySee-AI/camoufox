@@ -19,13 +19,6 @@ import pytest
 from playwright.async_api import Error, Page
 from tests.server import Server
 
-history_navigation_unsupported = pytest.mark.xfail(
-    reason="History-backed navigation does not currently behave like upstream Playwright in Rotunda.",
-    run=False,
-    strict=False,
-)
-
-
 async def test_wait_for_url_should_work(page: Page, server: Server) -> None:
     await page.goto(server.EMPTY_PAGE)
     await page.evaluate(
@@ -94,7 +87,6 @@ async def test_wait_for_url_should_work_with_history_replace_state(
     assert page.url == server.PREFIX + "/replaced.html"
 
 
-@history_navigation_unsupported
 async def test_wait_for_url_should_work_with_dom_history_back_forward(
     page: Page, server: Server
 ) -> None:
