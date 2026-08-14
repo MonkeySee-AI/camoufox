@@ -789,6 +789,9 @@ class PatchVerifier:
         command: list[str] = [compile_command[0]]
         for overlay_dir in overlay_dirs:
             command.extend(["-I", str(overlay_dir)])
+        # Relocating a translation unit breaks its same-directory quoted
+        # includes unless the original source directory remains searchable.
+        command.extend(["-I", str((context.source_tree / PurePosixPath(target).parent))])
 
         skip_next = False
         original_source_file = (context.source_tree / PurePosixPath(target)).resolve()

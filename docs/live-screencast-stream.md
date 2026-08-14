@@ -41,3 +41,23 @@ uv run scripts/stream-juggler-screencast.py \
 For more detail on starting Rotunda with a fixed Juggler port, see [Remote Juggler](remote-juggler.md).
 
 Stop the stream with `Ctrl-C`.
+
+## Stream One DOM Element
+
+Pass a Playwright selector to stream only the first matching element:
+
+```bash
+uv run scripts/stream-juggler-screencast.py \
+  --executable-path "$ROTUNDA_EXE" \
+  --url https://24timezones.com/San-Francisco/time \
+  --selector "#clock" \
+  --port 8899
+```
+
+Element streams use the `/mjpeg` multipart endpoint automatically, but each frame is a transparent PNG. Juggler resolves the selector once, then asks Gecko to paint only that element's layout frame and descendants. Page pixels below the element are excluded; shadows and remote iframe descendants remain part of the selected subtree. Resizes therefore produce images at the element's current native ink-overflow dimensions, and ordinary offscreen elements are captured without scrolling the page.
+
+`backdrop-filter` does not import or filter the original page backdrop; Gecko's content-side paint keeps the element's foreground but cannot reproduce that compositor-only effect. A root `mix-blend-mode` blends against transparency, while descendants can still blend with pixels inside the selected subtree. Including the original backdrop for either effect would reintroduce pixels outside the selection.
+
+For the native fixed-size H.264/HEVC path (viewport and selector) and its
+current platform support, see
+[Native viewport and selector video](element-video-stream.md).

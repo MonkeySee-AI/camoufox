@@ -11,9 +11,14 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'jugglerscreencast'
 
 SOURCES += [
+    'ElementVideoStream.cpp',
     'HeadlessWindowCapturer.cpp',
     'nsScreencastService.cpp',
     'ScreencastEncoder.cpp',
+]
+
+EXPORTS.mozilla.dom += [
+    'ElementVideoStream.h',
 ]
 
 XPCOM_MANIFESTS += [
@@ -22,11 +27,23 @@ XPCOM_MANIFESTS += [
 
 LOCAL_INCLUDES += [
     '!/dist/include/libwebrtc_overrides',
+    '/dom/media',
+    '/dom/media/platforms',
     '/dom/media/systemservices',
+    '/dom/media/webcodecs',
     '/media/libyuv/libyuv/include',
     '/third_party/abseil-cpp',
     '/third_party/libwebrtc',
 ]
+
+if CONFIG['OS_ARCH'] == 'Darwin':
+    SOURCES += ['ElementVideoStreamMac.mm']
+    OS_LIBS += ['-framework CoreImage']
+    LOCAL_INCLUDES += [
+        '/gfx/2d',
+        '/gfx/layers',
+        '/widget/cocoa',
+    ]
 
 LOCAL_INCLUDES += [
     '/widget',

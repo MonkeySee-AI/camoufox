@@ -923,7 +923,7 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, viewport.width, viewport.height, devicePixelRatio * rect.top);
+    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
     this._videoRecordingInfo = { sessionId, file };
     this.emit(PageTarget.Events.ScreencastStarted);
   }
@@ -940,31 +940,52 @@ export class PageTarget {
     return this._videoRecordingInfo;
   }
 
-  async startScreencast({ width, height, quality }) {
+  screencastInfo() {
+    return this._screencastRecordingInfo;
+  }
+
+  // Shared setup for the JPEG screencast and the native video stream, both of
+  // which register a screencast service session on this target.
+  async _screencastContext() {
+    if (this._screencastRecordingInfo)
+      throw new Error('Screencast is already running');
     // On Mac the window may not yet be visible when TargetCreated and its
     // NSWindow.windowNumber may be -1, so we wait until the window is known
     // to be initialized and visible.
     await this.windowReady();
-    if (width < 10 || width > 10000 || height < 10 || height > 10000)
-      throw new Error("Invalid size");
-
-    const docShell = this._gBrowser.ownerGlobal.docShell;
-    // Exclude address bar and navigation control from the video.
-    const rect = this.linkedBrowser().getBoundingClientRect();
-    const devicePixelRatio = this._window.devicePixelRatio;
 
     const self = this;
-    const screencastClient = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
-        if (self._screencastRecordingInfo)
-          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
-      },
-      screencastStopped() {
+    return {
+      docShell: this._gBrowser.ownerGlobal.docShell,
+      // Exclude address bar and navigation control from the video.
+      rect: this.linkedBrowser().getBoundingClientRect(),
+      devicePixelRatio: this._window.devicePixelRatio,
+      viewport: this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 },
+      screencastClient: {
+        QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
+        screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
+          if (self._screencastRecordingInfo)
+            self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
+        },
+        screencastStopped() {
+          // The native session stops itself when its encoder fails to create;
+          // release the slot so a new screencast can start on this target.
+          self._screencastRecordingInfo = undefined;
+        },
       },
     };
-    const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
+  }
+
+  async startScreencast({ width, height, quality }) {
+    const {docShell, rect, devicePixelRatio, viewport, screencastClient} = await this._screencastContext();
+    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
+    this._screencastRecordingInfo = { screencastId };
+    return { screencastId };
+  }
+
+  async startVideoStream({ width, height, fps, bitrate, codec }) {
+    const {docShell, rect, devicePixelRatio, viewport, screencastClient} = await this._screencastContext();
+    const screencastId = screencastService.startNativeVideoStream(screencastClient, docShell, width, height, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, fps, bitrate, codec);
     this._screencastRecordingInfo = { screencastId };
     return { screencastId };
   }

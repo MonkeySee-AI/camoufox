@@ -1,0 +1,177 @@
+diff --git a/gfx/layers/NativeLayer.h b/gfx/layers/NativeLayer.h
+index b9db9ffe55..027b0b7a0c 100644
+--- a/gfx/layers/NativeLayer.h
++++ b/gfx/layers/NativeLayer.h
+@@ -15,6 +15,8 @@
+ #include "nsISupportsImpl.h"
+ #include "nsRegion.h"
+ 
++class MacIOSurface;
++
+ namespace mozilla {
+ 
+ namespace gl {
+@@ -82,9 +84,8 @@ class NativeLayerRoot {
+   // Returns a new NativeLayerRootSnapshotter that can be used to read back the
+   // visual output of this NativeLayerRoot. The snapshotter needs to be
+   // destroyed on the same thread that CreateSnapshotter() was called on. Only
+-  // one snapshotter per NativeLayerRoot can be in existence at any given time.
+-  // CreateSnapshotter() makes sure of this and crashes if called at a time at
+-  // which there still exists a snapshotter for this NativeLayerRoot.
++  // one snapshotter per NativeLayerRoot can be in existence at any given time;
++  // CreateSnapshotter() returns nullptr while one already exists.
+   virtual UniquePtr<NativeLayerRootSnapshotter> CreateSnapshotter() {
+     return nullptr;
+   }
+@@ -102,6 +103,13 @@ class NativeLayerRootSnapshotter : public profiler_screenshots::Window {
+  public:
+   virtual ~NativeLayerRootSnapshotter() = default;
+ 
++#ifdef XP_MACOSX
++  virtual already_AddRefed<MacIOSurface> GetWindowIOSurface(
++      const gfx::IntSize& aWindowSize) {
++    return nullptr;
++  }
++#endif
++
+   // Reads the composited result of the NativeLayer tree into aReadbackBuffer,
+   // synchronously. Should only be called right after a call to CommitToScreen()
+   // - in that case it is guaranteed to read back exactly the NativeLayer state
+diff --git a/gfx/layers/NativeLayerCA.h b/gfx/layers/NativeLayerCA.h
+index 4559a259fe..4a8b3f1ff6 100644
+--- a/gfx/layers/NativeLayerCA.h
++++ b/gfx/layers/NativeLayerCA.h
+@@ -34,6 +34,7 @@ namespace mozilla {
+ namespace gl {
+ class GLContextCGL;
+ class MozFramebuffer;
++class SharedSurface_IOSurface;
+ }  // namespace gl
+ namespace wr {
+ class RenderMacIOSurfaceTextureHost;
+@@ -261,6 +262,8 @@ class NativeLayerRootSnapshotterCA final : public NativeLayerRootSnapshotter {
+                       const Range<uint8_t>& aReadbackBuffer) override;
+   already_AddRefed<profiler_screenshots::RenderSource> GetWindowContents(
+       const gfx::IntSize& aWindowSize) override;
++  already_AddRefed<MacIOSurface> GetWindowIOSurface(
++      const gfx::IntSize& aWindowSize) override;
+   already_AddRefed<profiler_screenshots::DownscaleTarget> CreateDownscaleTarget(
+       const gfx::IntSize& aSize) override;
+   already_AddRefed<profiler_screenshots::AsyncReadbackBuffer>
+@@ -270,6 +273,8 @@ class NativeLayerRootSnapshotterCA final : public NativeLayerRootSnapshotter {
+   NativeLayerRootSnapshotterCA(UniquePtr<SnapshotterCADelegate>&& aDelegate,
+                                RefPtr<gl::GLContext>&& aGL);
+   void UpdateSnapshot(const gfx::IntSize& aSize);
++  void RenderSnapshot(const gfx::IntSize& aSize, uint32_t aFramebuffer,
++                      bool aRedrawEverything);
+ 
+   UniquePtr<SnapshotterCADelegate> mDelegate;
+   RefPtr<gl::GLContext> mGL;
+diff --git a/gfx/layers/NativeLayerCA.mm b/gfx/layers/NativeLayerCA.mm
+index 894b06c7a3..1288cfa4a3 100644
+--- a/gfx/layers/NativeLayerCA.mm
++++ b/gfx/layers/NativeLayerCA.mm
+@@ -28,6 +28,7 @@
+ #include "GLContextProvider.h"
+ #include "MozFramebuffer.h"
+ #include "mozilla/gfx/Swizzle.h"
++#include "SharedSurfaceIO.h"
+ #include "mozilla/layers/ScreenshotGrabber.h"
+ #include "mozilla/layers/SurfacePoolCA.h"
+ #include "mozilla/StaticPrefs_gfx.h"
+@@ -327,9 +328,12 @@ static void EmitTelemetryForVideoLowPower(VideoLowPowerType aVideoLowPower) {
+ UniquePtr<NativeLayerRootSnapshotter> NativeLayerRootCA::CreateSnapshotter() {
+ #ifdef XP_MACOSX
+   MutexAutoLock lock(mMutex);
+-  MOZ_RELEASE_ASSERT(!mWeakSnapshotter,
+-                     "No NativeLayerRootSnapshotter for this NativeLayerRoot "
+-                     "should exist when this is called");
++  // Only one snapshotter may exist per root. Screencasting made a second
++  // requester reachable (profiler screenshots vs native video), so refuse
++  // instead of the upstream release assert.
++  if (mWeakSnapshotter) {
++    return nullptr;
++  }
+ 
+   auto cr = NativeLayerRootSnapshotterCA::Create(
+       MakeUnique<SnapshotterDelegate>(this));
+@@ -646,6 +650,47 @@ static void EmitTelemetryForVideoLowPower(VideoLowPowerType aVideoLowPower) {
+ }
+ 
+ void NativeLayerRootSnapshotterCA::UpdateSnapshot(const IntSize& aSize) {
++  bool needToRedrawEverything = false;
++  if (!mSnapshot || mSnapshot->Size() != aSize) {
++    mSnapshot = nullptr;
++    auto fb = gl::MozFramebuffer::Create(mGL, aSize, 0, false);
++    if (!fb) {
++      return;
++    }
++    mSnapshot = new RenderSourceNLRS(std::move(fb));
++    needToRedrawEverything = true;
++  }
++
++  RenderSnapshot(aSize, mSnapshot->FB().mFB, needToRedrawEverything);
++}
++
++already_AddRefed<MacIOSurface> NativeLayerRootSnapshotterCA::GetWindowIOSurface(
++    const IntSize& aWindowSize) {
++  // A fresh surface per call: consumers may still be reading a previously
++  // returned surface, so re-rendering a cached one would tear.
++  const gl::SharedSurfaceDesc desc{
++      {mGL.get(), gl::SharedSurfaceType::IOSurface, TextureType::MacIOSurface,
++       true},
++      aWindowSize,
++      gfx::ColorSpace2::SRGB};
++  UniquePtr<gl::SharedSurface_IOSurface> surface =
++      gl::SharedSurface_IOSurface::Create(desc);
++  if (!surface) {
++    return nullptr;
++  }
++
++  // This target is independent from profiler screenshots, so fill every
++  // pixel even when Core Animation reports only a partial dirty rectangle.
++  RenderSnapshot(aWindowSize, surface->mFb->mFB, true);
++  // Flushing publishes GL writes to other IOSurface clients; the fresh
++  // surface per call already prevents write-while-read tearing.
++  mGL->fFlush();
++  return do_AddRef(surface->mIOSurf);
++}
++
++void NativeLayerRootSnapshotterCA::RenderSnapshot(const IntSize& aSize,
++                                                  uint32_t aFramebuffer,
++                                                  bool aRedrawEverything) {
+   CGRect bounds = CGRectMake(0, 0, aSize.width, aSize.height);
+ 
+   {
+@@ -687,21 +732,9 @@ static void EmitTelemetryForVideoLowPower(VideoLowPowerType aVideoLowPower) {
+   }
+ 
+   mDelegate->UpdateSnapshotterLayers(mRenderer.layer);
+-
+   mGL->MakeCurrent();
+ 
+-  bool needToRedrawEverything = false;
+-  if (!mSnapshot || mSnapshot->Size() != aSize) {
+-    mSnapshot = nullptr;
+-    auto fb = gl::MozFramebuffer::Create(mGL, aSize, 0, false);
+-    if (!fb) {
+-      return;
+-    }
+-    mSnapshot = new RenderSourceNLRS(std::move(fb));
+-    needToRedrawEverything = true;
+-  }
+-
+-  const gl::ScopedBindFramebuffer bindFB(mGL, mSnapshot->FB().mFB);
++  const gl::ScopedBindFramebuffer bindFB(mGL, aFramebuffer);
+   mGL->fViewport(0.0, 0.0, aSize.width, aSize.height);
+ 
+   // These legacy OpenGL function calls are part of CARenderer's API contract,
+@@ -713,7 +746,7 @@ static void EmitTelemetryForVideoLowPower(VideoLowPowerType aVideoLowPower) {
+ 
+   float mediaTime = CACurrentMediaTime();
+   [mRenderer beginFrameAtTime:mediaTime timeStamp:nullptr];
+-  if (needToRedrawEverything) {
++  if (aRedrawEverything) {
+     [mRenderer addUpdateRect:bounds];
+   }
+   if (!CGRectIsEmpty([mRenderer updateBounds])) {
