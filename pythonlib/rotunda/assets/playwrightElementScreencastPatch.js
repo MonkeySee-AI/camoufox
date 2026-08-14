@@ -82,8 +82,6 @@ function patchPageDispatcher(dispatcherModule) {
   };
 
   PageDispatcher.prototype.videoStreamStart = async function(params, progress) {
-    if (process.platform !== "darwin")
-      throw new Error("Native video streaming is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.");
     if (this._screencastClient || this._videoStreamClient || this._videoRecorder || this._page.screencast._clients.size)
       throw new Error("Screencast is already running");
 

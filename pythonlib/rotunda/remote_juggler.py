@@ -12,9 +12,17 @@ from typing import Any
 import orjson
 
 from rotunda.assets import get_asset_by_name
+from rotunda.driver_hooks import install_playwright_driver_hooks
 from rotunda.server import get_nodejs
 
 BRIDGE_SCRIPT: Path = get_asset_by_name("connectRemoteJuggler.js")
+
+
+def _bridge_env() -> dict[str, str]:
+    install_playwright_driver_hooks()
+    from playwright._impl import _driver
+
+    return _driver.get_driver_env()
 
 
 def _bridge_payload(
@@ -110,6 +118,7 @@ def _start_bridge(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=_bridge_env(),
     )
     assert process.stdin is not None
     process.stdin.write(_encoded_payload(payload))
@@ -151,6 +160,7 @@ async def _start_bridge_async(
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_bridge_env(),
     )
     assert process.stdin is not None
     process.stdin.write(_encoded_payload(payload).encode())
