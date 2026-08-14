@@ -137,6 +137,7 @@ uvx rotunda agent stop 1
 ## Additional reading
 
 - [Remote Juggler](docs/remote-juggler.md): launch Rotunda with a fixed Juggler endpoint and connect from another local process.
+- [Video Streaming](docs/video-streaming.md): stream native H.264 or H.265 viewport and element video to your own client, with a complete WebRTC example.
 - [Live Screencast Stream](docs/live-screencast-stream.md): stream Rotunda browser frames over HLS for QuickTime or VLC.
 - [Agent CLI Architecture](docs/agent-cli-architecture.md): understand the daemon, resource-index, heartbeat, and singleton process model behind `uvx rotunda agent`.
 
