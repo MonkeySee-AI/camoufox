@@ -53,9 +53,13 @@ decoder while a canvas or popover shrink-wraps the resizing element. Each is:
 
 `RSE2 | flags:u8 | size:u32be | pts_us:u64be | duration_us:u32be | width:u32be | height:u32be | crop_x:u32be | crop_y:u32be | crop_width:u32be | crop_height:u32be | Annex-B bytes`
 
-A capture error (for example the selected element being detached) stops the
-screencast rather than erroring silently; restart the stream after re-resolving
-the selector.
+Video streaming is its own protocol surface (`Page.startVideoStream` /
+`Page.stopVideoStream`, `rotunda.screencast.start_video_stream` /
+`stop_video_stream` from Python), separate from the image screencast
+(`Page.startScreencast`), which keeps its upstream shape plus the PNG element
+selector extension. A capture error (for example the selected element being
+detached) stops the stream rather than erroring silently; restart it after
+re-resolving the selector.
 
 Run the real browser integration and local benchmark with:
 

@@ -5,7 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
-from rotunda.screencast import image_size, start_screencast
+from rotunda.screencast import (
+    image_size,
+    start_screencast,
+    start_video_stream,
+    stop_video_stream,
+)
 
 # The CLI wiring (mode defaults, HLS/MJPEG serving) stays script-only, so the
 # script module is still bootstrapped for those tests.
@@ -36,16 +41,20 @@ class RecordingChannel:
         return {}
 
 
-async def test_element_video_serializes_native_stream_options() -> None:
-    # Selector video must carry its fixed encoder canvas and bitrate through
-    # Playwright once; per-frame behavior belongs to the Rotunda integration.
-    channel = RecordingChannel()
+def fake_page(channel: RecordingChannel) -> SimpleNamespace:
     screencast = SimpleNamespace(
         _started=False,
         _on_frame=None,
         _page=SimpleNamespace(_channel=channel),
     )
-    page = SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
+    return SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
+
+
+async def test_element_screencast_serializes_selector_options() -> None:
+    # A selector screencast rides Playwright's screencastStart with only the
+    # image-mode extensions; video options belong to videoStreamStart.
+    channel = RecordingChannel()
+    page = fake_page(channel)
     on_frame = object()
 
     await start_screencast(
@@ -55,8 +64,6 @@ async def test_element_video_serializes_native_stream_options() -> None:
         {"width": 1920, "height": 1080},
         selector="#target",
         fps=37,
-        video=True,
-        bitrate=8_000_000,
     )
 
     assert channel.calls == [
@@ -70,48 +77,49 @@ async def test_element_video_serializes_native_stream_options() -> None:
                 "size": {"width": 1920, "height": 1080},
                 "selector": "#target",
                 "fps": 37,
-                "video": True,
-                "bitrate": 8_000_000,
-                "codec": "h264",
             },
         )
     ]
+    screencast = page.screencast._impl_obj
     assert screencast._started is True
     assert screencast._on_frame is on_frame
 
 
-async def test_viewport_video_serializes_without_a_selector() -> None:
-    # A selector-less video request must retain the native timing and encoder
-    # options instead of falling back to Playwright's legacy JPEG screencast.
+async def test_video_stream_serializes_start_and_stop() -> None:
+    # Video streaming is its own channel method pair carrying the encoder
+    # options; stop resets the shared frame-dispatch state.
     channel = RecordingChannel()
-    screencast = SimpleNamespace(
-        _started=False,
-        _on_frame=None,
-        _page=SimpleNamespace(_channel=channel),
-    )
-    page = SimpleNamespace(screencast=SimpleNamespace(_impl_obj=screencast))
+    page = fake_page(channel)
+    on_frame = object()
 
-    await start_screencast(
+    await start_video_stream(
         page,
-        object(),
-        90,
-        {"width": 3840, "height": 2160},
+        on_frame,
+        size={"width": 3840, "height": 2160},
+        selector="#target",
         fps=60,
-        video=True,
         bitrate=35_000_000,
         codec="h265",
     )
+    await stop_video_stream(page)
 
-    assert channel.calls[0][2] == {
-        "quality": 90,
-        "sendFrames": True,
-        "record": False,
-        "size": {"width": 3840, "height": 2160},
-        "fps": 60,
-        "video": True,
-        "bitrate": 35_000_000,
-        "codec": "h265",
-    }
+    assert channel.calls == [
+        (
+            "videoStreamStart",
+            None,
+            {
+                "fps": 60,
+                "bitrate": 35_000_000,
+                "codec": "h265",
+                "size": {"width": 3840, "height": 2160},
+                "selector": "#target",
+            },
+        ),
+        ("videoStreamStop", None, {}),
+    ]
+    screencast = page.screencast._impl_obj
+    assert screencast._started is False
+    assert screencast._on_frame is None
 
 
 def test_selector_defaults_to_mjpeg_and_rejects_hls(monkeypatch) -> None:

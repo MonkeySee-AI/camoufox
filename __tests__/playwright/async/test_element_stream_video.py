@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from playwright.async_api import Page, Playwright
-from rotunda.screencast import normalize_frame_data, start_screencast
+from rotunda.screencast import normalize_frame_data, start_video_stream, stop_video_stream
 from tests.server import Server
 
 ROOT = Path(__file__).parents[3]
@@ -175,14 +175,12 @@ async def test_webrtc_selector_video_crops_in_real_browser(
             if track := state.get("track"):
                 track.push(normalize_frame_data(frame["data"]))
 
-        await start_screencast(
+        await start_video_stream(
             page,
             on_frame,
-            quality=90,
             size={"width": 320, "height": 180},
             selector="#target",
             fps=30,
-            video=True,
             bitrate=2_000_000,
             codec="h264",
         )
@@ -223,7 +221,7 @@ async def test_webrtc_selector_video_crops_in_real_browser(
         assert pixel[2] > 140 and pixel[0] < 80, pixel
 
         with contextlib.suppress(Exception):
-            await page.screencast.stop()
+            await stop_video_stream(page)
 
 
 async def test_webrtc_viewport_video_fills_canvas_and_resolves_iframe(
@@ -263,13 +261,11 @@ async def test_webrtc_viewport_video_fills_canvas_and_resolves_iframe(
             if track := state.get("track"):
                 track.push(normalize_frame_data(frame["data"]))
 
-        await start_screencast(
+        await start_video_stream(
             page,
             on_frame,
-            quality=90,
             size={"width": 640, "height": 360},
             fps=30,
-            video=True,
             bitrate=3_000_000,
             codec="h264",
         )
@@ -311,4 +307,4 @@ async def test_webrtc_viewport_video_fills_canvas_and_resolves_iframe(
         assert left[2] > 120, left
 
         with contextlib.suppress(Exception):
-            await page.screencast.stop()
+            await stop_video_stream(page)

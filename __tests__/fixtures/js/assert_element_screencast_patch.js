@@ -7,30 +7,43 @@ require(base + "/server/index.js");
 const {maybeFindValidator} = require(base + "/protocol/validatorPrimitives.js");
 const {PageDispatcher} = require(base + "/server/dispatchers/pageDispatcher.js");
 
-const validator = maybeFindValidator("Page", "screencastStart", "Params");
-const validated = validator(
+const context = {binary: "fromBase64", isUnderTest: () => false, tChannelImpl: () => null};
+
+const screencastValidator = maybeFindValidator("Page", "screencastStart", "Params");
+const screencast = screencastValidator(
   {quality: 91, sendFrames: true, record: false, selector: "#target", fps: 37},
   "",
-  {binary: "fromBase64", isUnderTest: () => false, tChannelImpl: () => null},
+  context,
 );
-if (validated.selector !== "#target" || validated.fps !== 37)
+if (screencast.selector !== "#target" || screencast.fps !== 37)
   throw new Error("element screencast validator dropped selector parameters");
-const viewportVideo = validator(
-  {quality: 90, sendFrames: true, record: false, video: true, fps: 60},
+
+const videoValidator = maybeFindValidator("Page", "videoStreamStart", "Params");
+if (!videoValidator)
+  throw new Error("missing videoStreamStart validator scheme");
+const video = videoValidator(
+  {size: {width: 3840, height: 2160}, selector: "#target", fps: 60, bitrate: 35000000, codec: "h265"},
   "",
-  {binary: "fromBase64", isUnderTest: () => false, tChannelImpl: () => null},
+  context,
 );
-if (!viewportVideo.video || viewportVideo.fps !== 60)
-  throw new Error("viewport video validator dropped native stream parameters");
+if (video.codec !== "h265" || video.bitrate !== 35000000 || video.fps !== 60)
+  throw new Error("video stream validator dropped encoder parameters");
+if (!maybeFindValidator("Page", "videoStreamStop", "Params"))
+  throw new Error("missing videoStreamStop validator scheme");
+
 if (!String(PageDispatcher.prototype.screencastStart).includes('session.send("Page.startScreencast"'))
   throw new Error("missing element screencast dispatcher path");
+if (!String(PageDispatcher.prototype.videoStreamStart).includes('session.send("Page.startVideoStream"'))
+  throw new Error("missing video stream dispatcher path");
+if (!String(PageDispatcher.prototype.videoStreamStop).includes('session.send("Page.stopVideoStream"'))
+  throw new Error("missing video stream stop dispatcher path");
 
 async function assertPlatformGate() {
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", {...platform, value: "linux"});
   try {
-    await PageDispatcher.prototype.screencastStart.call({}, {video: true});
-    throw new Error("native video screencast unexpectedly allowed Linux");
+    await PageDispatcher.prototype.videoStreamStart.call({}, {});
+    throw new Error("native video streaming unexpectedly allowed Linux");
   } catch (error) {
     if (!String(error).includes("supported only on macOS"))
       throw error;

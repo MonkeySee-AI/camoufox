@@ -116,10 +116,9 @@ async def start_screencast(
     *,
     selector: str | None = None,
     fps: int = 25,
-    video: bool = False,
-    bitrate: int = 12_000_000,
-    codec: str = "h264",
 ) -> None:
+    """Start an image screencast: JPEG viewport frames, or PNG element frames
+    when a selector is given. Stop with ``page.screencast.stop()``."""
     screencast = page.screencast._impl_obj
     if screencast._started:
         raise RuntimeError("Screencast is already started")
@@ -135,10 +134,7 @@ async def start_screencast(
             params["size"] = size
         if selector:
             params["selector"] = selector
-        if selector or video:
             params["fps"] = fps
-        if video:
-            params.update(video=True, bitrate=bitrate, codec=codec)
         await screencast._page._channel.send_return_as_dict(
             "screencastStart",
             None,
@@ -148,3 +144,51 @@ async def start_screencast(
         screencast._started = False
         screencast._on_frame = None
         raise
+
+
+async def start_video_stream(
+    page: Any,
+    on_frame: Any,
+    *,
+    size: dict[str, int] | None = None,
+    selector: str | None = None,
+    fps: int = 25,
+    bitrate: int = 12_000_000,
+    codec: str = "h264",
+) -> None:
+    """Start a native compressed video stream (RSE2 packets) of the viewport,
+    or of one element when a selector is given. macOS only. Stop with
+    :func:`stop_video_stream`."""
+    screencast = page.screencast._impl_obj
+    if screencast._started:
+        raise RuntimeError("Screencast is already started")
+    screencast._started = True
+    screencast._on_frame = on_frame
+    try:
+        params: dict[str, Any] = {"fps": fps, "bitrate": bitrate, "codec": codec}
+        if size:
+            params["size"] = size
+        if selector:
+            params["selector"] = selector
+        await screencast._page._channel.send_return_as_dict(
+            "videoStreamStart",
+            None,
+            params,
+        )
+    except Exception:
+        screencast._started = False
+        screencast._on_frame = None
+        raise
+
+
+async def stop_video_stream(page: Any) -> None:
+    screencast = page.screencast._impl_obj
+    try:
+        await screencast._page._channel.send_return_as_dict(
+            "videoStreamStop",
+            None,
+            {},
+        )
+    finally:
+        screencast._started = False
+        screencast._on_frame = None

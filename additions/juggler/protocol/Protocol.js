@@ -991,13 +991,26 @@ const Page = {
         frameId: t.Optional(t.String),
         objectId: t.Optional(t.String),
         fps: t.Optional(t.Number),
-        video: t.Optional(t.Boolean),
-        bitrate: t.Optional(t.Number),
-        codec: t.Optional(t.String),
       },
       returns: {
         screencastId: t.String,
       },
+    },
+    'startVideoStream': {
+      params: {
+        width: t.Optional(t.Number),
+        height: t.Optional(t.Number),
+        fps: t.Optional(t.Number),
+        bitrate: t.Optional(t.Number),
+        codec: t.Optional(t.String),
+        frameId: t.Optional(t.String),
+        objectId: t.Optional(t.String),
+      },
+      returns: {
+        streamId: t.String,
+      },
+    },
+    'stopVideoStream': {
     },
     'screencastFrameAck': {
       params: {

@@ -19,10 +19,17 @@ function patchValidator(validatorFilename) {
     record: tOptional(tBoolean),
     selector: tOptional(tString),
     fps: tOptional(tInt),
-    video: tOptional(tBoolean),
+  });
+  scheme.PageVideoStreamStartParams = tObject({
+    size: tOptional(tObject({width: tInt, height: tInt})),
+    selector: tOptional(tString),
+    fps: tOptional(tInt),
     bitrate: tOptional(tInt),
     codec: tOptional(tString),
   });
+  scheme.PageVideoStreamStartResult = tObject({});
+  scheme.PageVideoStreamStopParams = tObject({});
+  scheme.PageVideoStreamStopResult = tObject({});
 }
 
 function patchPageDispatcher(dispatcherModule) {
@@ -32,19 +39,17 @@ function patchPageDispatcher(dispatcherModule) {
 
   const original = PageDispatcher.prototype.screencastStart;
   PageDispatcher.prototype.screencastStart = async function(params, progress) {
-    if (!params.selector && !params.video)
+    if (!params.selector)
       return await original.call(this, params, progress);
-    if (params.video && process.platform !== "darwin")
-      throw new Error("Native video screencast is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.");
     if (!params.sendFrames || params.record)
-      throw new Error("Native video screencast only supports live frame streaming");
-    if (this._screencastClient || this._videoRecorder || this._page.screencast._clients.size)
+      throw new Error("Element screencast only supports live frame streaming");
+    if (this._screencastClient || this._videoStreamClient || this._videoRecorder || this._page.screencast._clients.size)
       throw new Error("Screencast is already running");
 
-    const element = params.selector ? await progress.race(
+    const element = await progress.race(
       this._page.mainFrame().querySelector(params.selector, {strict: false}),
-    ) : null;
-    if (params.selector && !element)
+    );
+    if (!element)
       throw new Error(`Element screencast selector did not match: ${params.selector}`);
 
     const session = this._page.delegate && this._page.delegate._session;
@@ -61,10 +66,49 @@ function patchPageDispatcher(dispatcherModule) {
     // through Page.stopScreencast.
     this._page.screencast._clients.add(client);
     try {
-      const options = {
-        quality: params.quality ?? 90,
+      await session.send("Page.startScreencast", {
         fps: params.fps ?? 25,
-        video: params.video ?? false,
+        frameId: element._context.frame._id,
+        objectId: element._objectId,
+      });
+    } catch (error) {
+      this._screencastClient = undefined;
+      this._page.screencast.removeClient(client);
+      throw error;
+    } finally {
+      element?.dispose();
+    }
+    return {};
+  };
+
+  PageDispatcher.prototype.videoStreamStart = async function(params, progress) {
+    if (process.platform !== "darwin")
+      throw new Error("Native video streaming is currently supported only on macOS. Linux and Microsoft Windows are not supported yet; contributions are welcome.");
+    if (this._screencastClient || this._videoStreamClient || this._videoRecorder || this._page.screencast._clients.size)
+      throw new Error("Screencast is already running");
+
+    const element = params.selector ? await progress.race(
+      this._page.mainFrame().querySelector(params.selector, {strict: false}),
+    ) : null;
+    if (params.selector && !element)
+      throw new Error(`Video stream selector did not match: ${params.selector}`);
+
+    const session = this._page.delegate && this._page.delegate._session;
+    if (!session)
+      throw new Error("Video streaming requires Rotunda's Firefox/Juggler backend");
+
+    const client = {
+      onFrame: frame => this._dispatchEvent("screencastFrame", {data: frame.buffer}),
+      dispose() {},
+    };
+    this._videoStreamClient = client;
+    // Raw add (and raw delete in videoStreamStop): addClient would auto-start
+    // the default viewport screencast, and video stream teardown flows through
+    // Page.stopVideoStream instead of the screencast stop path.
+    this._page.screencast._clients.add(client);
+    try {
+      const options = {
+        fps: params.fps ?? 25,
         bitrate: params.bitrate ?? 12000000,
         codec: params.codec ?? "h264",
         width: params.size?.width,
@@ -74,13 +118,28 @@ function patchPageDispatcher(dispatcherModule) {
         options.frameId = element._context.frame._id;
         options.objectId = element._objectId;
       }
-      await session.send("Page.startScreencast", options);
+      await session.send("Page.startVideoStream", options);
     } catch (error) {
-      this._screencastClient = undefined;
-      this._page.screencast.removeClient(client);
+      this._videoStreamClient = undefined;
+      this._page.screencast._clients.delete(client);
       throw error;
     } finally {
       element?.dispose();
+    }
+    return {};
+  };
+
+  PageDispatcher.prototype.videoStreamStop = async function() {
+    const client = this._videoStreamClient;
+    if (!client)
+      return {};
+    this._videoStreamClient = undefined;
+    const session = this._page.delegate && this._page.delegate._session;
+    try {
+      if (session)
+        await session.send("Page.stopVideoStream");
+    } finally {
+      this._page.screencast._clients.delete(client);
     }
     return {};
   };

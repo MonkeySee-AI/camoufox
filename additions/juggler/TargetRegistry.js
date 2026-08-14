@@ -944,8 +944,9 @@ export class PageTarget {
     return this._screencastRecordingInfo;
   }
 
-  // Options arrive validated and fully defaulted from Page.startScreencast.
-  async startScreencast({ width, height, quality, video, fps, bitrate, codec }) {
+  // Shared setup for the JPEG screencast and the native video stream, both of
+  // which register a screencast service session on this target.
+  async _screencastContext() {
     if (this._screencastRecordingInfo)
       throw new Error('Screencast is already running');
     // On Mac the window may not yet be visible when TargetCreated and its
@@ -953,28 +954,38 @@ export class PageTarget {
     // to be initialized and visible.
     await this.windowReady();
 
-    const docShell = this._gBrowser.ownerGlobal.docShell;
-    // Exclude address bar and navigation control from the video.
-    const rect = this.linkedBrowser().getBoundingClientRect();
-    const devicePixelRatio = this._window.devicePixelRatio;
-
     const self = this;
-    const screencastClient = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
-        if (self._screencastRecordingInfo)
-          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
-      },
-      screencastStopped() {
-        // The native session stops itself when its encoder fails to create;
-        // release the slot so a new screencast can start on this target.
-        self._screencastRecordingInfo = undefined;
+    return {
+      docShell: this._gBrowser.ownerGlobal.docShell,
+      // Exclude address bar and navigation control from the video.
+      rect: this.linkedBrowser().getBoundingClientRect(),
+      devicePixelRatio: this._window.devicePixelRatio,
+      viewport: this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 },
+      screencastClient: {
+        QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
+        screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
+          if (self._screencastRecordingInfo)
+            self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
+        },
+        screencastStopped() {
+          // The native session stops itself when its encoder fails to create;
+          // release the slot so a new screencast can start on this target.
+          self._screencastRecordingInfo = undefined;
+        },
       },
     };
-    const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    const screencastId = video
-      ? screencastService.startNativeVideoStream(screencastClient, docShell, width, height, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, fps, bitrate, codec)
-      : screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
+  }
+
+  async startScreencast({ width, height, quality }) {
+    const {docShell, rect, devicePixelRatio, viewport, screencastClient} = await this._screencastContext();
+    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
+    this._screencastRecordingInfo = { screencastId };
+    return { screencastId };
+  }
+
+  async startVideoStream({ width, height, fps, bitrate, codec }) {
+    const {docShell, rect, devicePixelRatio, viewport, screencastClient} = await this._screencastContext();
+    const screencastId = screencastService.startNativeVideoStream(screencastClient, docShell, width, height, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, fps, bitrate, codec);
     this._screencastRecordingInfo = { screencastId };
     return { screencastId };
   }

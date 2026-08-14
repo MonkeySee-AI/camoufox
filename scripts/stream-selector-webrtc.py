@@ -45,7 +45,8 @@ from rotunda.screencast import (
     normalize_frame_data,
     parse_viewport,
     resolve_page,
-    start_screencast,
+    start_video_stream,
+    stop_video_stream,
 )
 
 RSE2_HEADER_SIZE = 45
@@ -593,14 +594,12 @@ async def stream(args: argparse.Namespace) -> None:
                     if track:
                         track.push(normalize_frame_data(frame["data"]))
 
-                await start_screencast(
+                await start_video_stream(
                     page,
                     on_frame,
-                    quality=90,
                     size=args.video_size,
                     selector=args.selector,
                     fps=args.fps,
-                    video=True,
                     bitrate=round(args.bitrate_mbps * 1_000_000),
                     codec=args.codec,
                 )
@@ -657,7 +656,7 @@ async def stream(args: argparse.Namespace) -> None:
                     summary = await viewer.evaluate("window.__summary()")
             finally:
                 with contextlib.suppress(Exception):
-                    await page.screencast.stop()
+                    await stop_video_stream(page)
                 if client_browser:
                     with contextlib.suppress(Exception):
                         await client_browser.close()
