@@ -137,6 +137,7 @@ async def webrtc_viewer(playwright: Playwright, viewport: dict[str, int]):
             await asyncio.wait_for(chrome.close(), timeout=5)
 
 
+@pytest.mark.only_platform("darwin")
 async def test_webrtc_selector_video_crops_in_real_browser(
     page: Page, playwright: Playwright
 ) -> None:
@@ -224,6 +225,7 @@ async def test_webrtc_selector_video_crops_in_real_browser(
             await stop_video_stream(page)
 
 
+@pytest.mark.only_platform("darwin")
 async def test_webrtc_viewport_video_fills_canvas_and_resolves_iframe(
     page: Page, playwright: Playwright, server: Server
 ) -> None:
