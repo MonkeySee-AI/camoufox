@@ -68,7 +68,7 @@ index 4559a259fe..4a8b3f1ff6 100644
    UniquePtr<SnapshotterCADelegate> mDelegate;
    RefPtr<gl::GLContext> mGL;
 diff --git a/gfx/layers/NativeLayerCA.mm b/gfx/layers/NativeLayerCA.mm
-index 894b06c7a3..adb986f302 100644
+index 894b06c7a3..1288cfa4a3 100644
 --- a/gfx/layers/NativeLayerCA.mm
 +++ b/gfx/layers/NativeLayerCA.mm
 @@ -28,6 +28,7 @@
@@ -131,9 +131,9 @@ index 894b06c7a3..adb986f302 100644
 +  // This target is independent from profiler screenshots, so fill every
 +  // pixel even when Core Animation reports only a partial dirty rectangle.
 +  RenderSnapshot(aWindowSize, surface->mFb->mFB, true);
-+  // The consumer reads the IOSurface through another API on another thread,
-+  // so the GL work must be complete, not merely flushed, before handoff.
-+  mGL->fFinish();
++  // Flushing publishes GL writes to other IOSurface clients; the fresh
++  // surface per call already prevents write-while-read tearing.
++  mGL->fFlush();
 +  return do_AddRef(surface->mIOSurf);
 +}
 +

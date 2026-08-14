@@ -17,7 +17,7 @@ clients consume them; PNG, Python image work, FFmpeg, and MSE are absent:
 
 | Platform | Working path | 4K60 target |
 | --- | --- | --- |
-| macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Measured at 4K60 headed (compositor IOSurface path); headless uses a CPU WebRender readback that preserves correctness but is not the 4K60 design |
+| macOS | Core Animation layer tree / element surface → NV12 `IOSurface` → VideoToolbox HEVC | Headed compositor IOSurface path; throughput scales with output size (measurements below). Headless uses a CPU WebRender readback that preserves correctness but is not the 4K60 design |
 | Microsoft Windows | Not currently supported | D3D11 texture wrapped with `MFCreateDXGISurfaceBuffer` |
 | Linux | Not currently supported | DMA-BUF imported by VAAPI/NVENC in RDD/GPU |
 
@@ -39,9 +39,14 @@ On Apple Silicon the macOS path uses eight bounded frames in flight, per-frame
 VideoToolbox completions, synchronized Core Image RGB→NV12 compositing, and HEVC
 for 4K. Headed capture renders the already-composited Core Animation layer tree
 directly into an IOSurface on the compositor thread, avoiding the synchronous
-CPU WebRender readback. A 15-second headed measurement of the full 1280×720
-browser viewport scaled to 3840×2160 sustained 59.52 native and decoded
-frames/s and 59.78 presented frames/s in real Chrome with no decoder errors.
+CPU WebRender readback. Sustained throughput is bounded by the synchronous
+main-thread Core Image composite into the fixed output canvas, so it scales
+with output size and machine load: 15-second headed measurements of the full
+1280×720 browser viewport reached ~30 fps at 3840×2160 and ~45 fps at
+1920×1080 on a loaded development machine (an earlier idle-machine run
+sustained 59.52 fps at 4K), always with zero decoder errors in real Chrome.
+Chaining the Core Image completion into the encoder instead of blocking the
+main thread is the known lever for lifting this bound.
 
 The binary callback may contain multiple frames. `RSE2` carries the centered
 content rectangle for that exact encoded frame, letting clients keep a fixed

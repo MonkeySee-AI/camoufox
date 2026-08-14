@@ -343,13 +343,12 @@ function layout(){{
   video.style.width=W*scale+'px';video.style.height=H*scale+'px';
   video.style.left=-region.x*scale+'px';video.style.top=-region.y*scale+'px';
 }}
-pc.ondatachannel=event=>{{
-  event.channel.onmessage=message=>{{
-    try{{
-      const data=JSON.parse(message.data);
-      if(data.type==='crop'&&data.width&&data.height){{window.__crop=data;layout();}}
-    }}catch(error){{}}
-  }};
+const metadata=pc.createDataChannel('metadata');
+metadata.onmessage=message=>{{
+  try{{
+    const data=JSON.parse(message.data);
+    if(data.type==='crop'&&data.width&&data.height){{window.__crop=data;layout();}}
+  }}catch(error){{}}
 }};
 new ResizeObserver(layout).observe(stage);
 video.addEventListener('resize',layout);
@@ -489,26 +488,28 @@ async def start_server(
             state.update(pc=pc, track=track)
             # RTP carries only the bitstream, so the RSE2 crop rectangle rides
             # a data channel; the viewer shrink-wraps the presented region.
-            metadata = pc.createDataChannel("metadata")
+            # The viewer (offerer) creates the channel — an answer cannot add
+            # an m=application section the offer lacked — and it arrives here.
+            @pc.on("datachannel")
+            def on_datachannel(channel: Any) -> None:
+                if channel.label != "metadata":
+                    return
 
-            def send_crop(crop: tuple[int, int, int, int]) -> None:
-                if metadata.readyState == "open":
-                    metadata.send(
-                        json.dumps(
-                            {
-                                "type": "crop",
-                                "x": crop[0],
-                                "y": crop[1],
-                                "width": crop[2],
-                                "height": crop[3],
-                            }
+                def send_crop(crop: tuple[int, int, int, int]) -> None:
+                    if channel.readyState == "open":
+                        channel.send(
+                            json.dumps(
+                                {
+                                    "type": "crop",
+                                    "x": crop[0],
+                                    "y": crop[1],
+                                    "width": crop[2],
+                                    "height": crop[3],
+                                }
+                            )
                         )
-                    )
 
-            track.on_crop = send_crop
-
-            @metadata.on("open")
-            def metadata_open() -> None:
+                track.on_crop = send_crop
                 if track.crop:
                     send_crop(track.crop)
 
@@ -611,10 +612,21 @@ async def stream(args: argparse.Namespace) -> None:
                     await viewer.goto(viewer_url)
                     try:
                         await viewer.wait_for_function(
-                            "([w,h]) => window.__webrtc.framesDecoded >= 30 && document.querySelector('video').videoWidth === w && document.querySelector('video').videoHeight === h",
-                            arg=[args.video_size["width"], args.video_size["height"]],
+                            "([w,h,selector]) => window.__webrtc.framesDecoded >= 30 && document.querySelector('video').videoWidth === w && document.querySelector('video').videoHeight === h && (!selector || window.__crop)",
+                            arg=[
+                                args.video_size["width"],
+                                args.video_size["height"],
+                                bool(args.selector),
+                            ],
                             timeout=15_000,
                         )
+                        crop = await viewer.evaluate("() => window.__crop")
+                        if crop:
+                            print(
+                                f"Viewer crop: {crop['width']}x{crop['height']}"
+                                f" at ({crop['x']}, {crop['y']})",
+                                flush=True,
+                            )
                     except Exception as error:
                         diagnostic = await viewer.evaluate(
                             """() => {
