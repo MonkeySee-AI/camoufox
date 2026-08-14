@@ -1,8 +1,18 @@
 # Video streaming
 
-Rotunda can stream a page viewport or one DOM element as native H.264 or H.265
-video. Rotunda owns capture and encoding; your client owns transport, playback,
-and viewer access.
+Rotunda's native video streaming is for applications that need a real-time view
+of browser content at up to near-60 fps in 4K. Normal Playwright APIs expose
+screenshots and file-oriented video recording, not a low-latency stream of
+hardware-encoded frames. Stock automation browsers likewise do not provide a
+direct compositor-to-encoder path, so screenshot loops and image screencasts
+cannot deliver the same combination of resolution, frame rate, and latency.
+
+Rotunda adds that path to the browser. It can stream a page viewport or one DOM
+element as native H.264 or H.265 video without an intermediate PNG/JPEG encode
+or a client-side re-encode. Rotunda owns capture and encoding; your client owns
+transport, playback, and viewer access. Actual throughput depends on output
+size, capture mode, machine, and load; the architecture is designed to approach
+4K60 on the headed macOS compositor path.
 
 Native video streaming currently requires macOS. For the older image-based
 screencast path and an HLS player example, see [Live Screencast Stream](live-screencast-stream.md).
