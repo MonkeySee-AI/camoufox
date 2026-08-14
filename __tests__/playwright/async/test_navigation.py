@@ -31,11 +31,6 @@ from playwright.async_api import (
 )
 from tests.server import Server, TestServerRequest
 
-history_navigation_unsupported = pytest.mark.xfail(
-    reason="History-backed navigation does not currently behave like upstream Playwright in Rotunda.",
-    run=False,
-    strict=False,
-)
 non_network_reload_unsupported = pytest.mark.xfail(
     reason="Reload semantics for non-network pages do not currently match upstream Playwright in Rotunda.",
     run=False,
@@ -588,7 +583,6 @@ async def test_wait_for_nav_should_work_with_history_replace_state(
     assert page.url == server.PREFIX + "/replaced.html"
 
 
-@history_navigation_unsupported
 async def test_wait_for_nav_should_work_with_dom_history_back_forward(
     page: Page, server: Server
 ) -> None:
@@ -936,7 +930,6 @@ async def test_wait_for_load_state_in_popup(
     assert len(css_requests)
 
 
-@history_navigation_unsupported
 async def test_go_back_should_work(page: Page, server: Server) -> None:
     assert await page.go_back() is None
 
@@ -957,7 +950,6 @@ async def test_go_back_should_work(page: Page, server: Server) -> None:
     assert response is None
 
 
-@history_navigation_unsupported
 async def test_go_back_should_work_with_history_api(page: Page, server: Server) -> None:
     await page.goto(server.EMPTY_PAGE)
     await page.evaluate(

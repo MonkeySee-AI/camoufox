@@ -937,6 +937,54 @@ def test_launch_options_sets_headless_firefox_viewport_env(
     ]
 
 
+def test_launch_options_enables_session_history_by_default(
+    modules: tuple[Any, Any, Any],
+    fake_fingerprint: FakeFingerprint,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The browser build ships browser.sessionhistory.max_entries=0, which
+    # disables back/forward navigation; launch_options must always restore it.
+    _, _, utils = modules
+    monkeypatch.setattr(utils, "generate_fingerprint", lambda **_: fake_fingerprint)
+
+    options = utils.launch_options(env={"TEST_ENV": "1"}, headless=True)
+
+    assert options["firefox_user_prefs"]["browser.sessionhistory.max_entries"] == 50
+
+
+def test_launch_options_keeps_explicit_session_history_pref(
+    modules: tuple[Any, Any, Any],
+    fake_fingerprint: FakeFingerprint,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    monkeypatch.setattr(utils, "generate_fingerprint", lambda **_: fake_fingerprint)
+
+    options = utils.launch_options(
+        env={"TEST_ENV": "1"},
+        headless=True,
+        firefox_user_prefs={"browser.sessionhistory.max_entries": 0},
+    )
+
+    assert options["firefox_user_prefs"]["browser.sessionhistory.max_entries"] == 0
+
+
+def test_launch_options_enable_cache_keeps_session_history(
+    modules: tuple[Any, Any, Any],
+    fake_fingerprint: FakeFingerprint,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, utils = modules
+    monkeypatch.setattr(utils, "generate_fingerprint", lambda **_: fake_fingerprint)
+
+    options = utils.launch_options(env={"TEST_ENV": "1"}, headless=True, enable_cache=True)
+    prefs = options["firefox_user_prefs"]
+
+    assert prefs["browser.sessionhistory.max_entries"] == 50
+    assert prefs["browser.sessionhistory.max_total_viewers"] == -1
+    assert prefs["browser.cache.memory.enable"] is True
+
+
 def test_persistent_context_options_sets_viewport_from_runtime_profile(
     modules: tuple[Any, Any, Any],
     fake_fingerprint: FakeFingerprint,
