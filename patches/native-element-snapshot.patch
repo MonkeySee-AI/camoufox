@@ -1,16 +1,15 @@
 diff --git a/dom/chrome-webidl/WindowGlobalActors.webidl b/dom/chrome-webidl/WindowGlobalActors.webidl
-index a1f031ffe2..f3127df373 100644
+index a1f031ffe2..63fc1bf2a5 100644
 --- a/dom/chrome-webidl/WindowGlobalActors.webidl
 +++ b/dom/chrome-webidl/WindowGlobalActors.webidl
-@@ -217,4 +217,21 @@ interface WindowGlobalChild {
+@@ -217,4 +217,20 @@ interface WindowGlobalChild {
    [Throws]
    JSWindowActorChild getActor(UTF8String name);
    JSWindowActorChild? getExistingActor(UTF8String name);
 +
 +  /** Paint an element subtree on a transparent surface and return PNG data. */
 +  [NewObject]
-+  Promise<DOMString> drawElementSnapshot(Element element,
-+                                         optional double scale = 1.0);
++  Promise<DOMString> drawElementSnapshot(Element element);
 +
 +  /** Paint an element subtree and encode it into a persistent native stream. */
 +  [NewObject]
@@ -49,7 +48,7 @@ index 91dc9ac48f..2778c370a4 100644
    // BrowsingContext. aTargetBC must be in the same BrowsingContextGroup as this
    // window global.
 diff --git a/dom/ipc/WindowGlobalChild.cpp b/dom/ipc/WindowGlobalChild.cpp
-index ceb57c0341..e439c34218 100644
+index ceb57c0341..d6b2e7abf7 100644
 --- a/dom/ipc/WindowGlobalChild.cpp
 +++ b/dom/ipc/WindowGlobalChild.cpp
 @@ -36,6 +36,7 @@
@@ -65,18 +64,18 @@ index ceb57c0341..e439c34218 100644
  }
  
 +already_AddRefed<Promise> WindowGlobalChild::DrawElementSnapshot(
-+    Element& aElement, double aScale, ErrorResult& aRv) {
++    Element& aElement, ErrorResult& aRv) {
 +  RefPtr<Promise> promise = Promise::Create(mWindowGlobal->AsGlobal(), aRv);
 +  if (aRv.Failed()) {
 +    return nullptr;
 +  }
-+  if (aScale <= 0 || aElement.OwnerDoc() != mWindowGlobal->GetExtantDoc()) {
++  if (aElement.OwnerDoc() != mWindowGlobal->GetExtantDoc()) {
 +    promise->MaybeReject(NS_ERROR_INVALID_ARG);
 +    return promise.forget();
 +  }
 +
 +  gfx::PaintFragment fragment =
-+      gfx::PaintFragment::RecordElement(&aElement, aScale);
++      gfx::PaintFragment::RecordElement(&aElement, 1.0f);
 +  if (fragment.IsEmpty()) {
 +    promise->MaybeReject(NS_ERROR_FAILURE);
 +    return promise.forget();
@@ -166,7 +165,7 @@ index ceb57c0341..e439c34218 100644
      JS::Handle<JSObject*> aMaybeActor, const nsACString& aName,
      ErrorResult& aRv) {
 diff --git a/dom/ipc/WindowGlobalChild.h b/dom/ipc/WindowGlobalChild.h
-index 956a5313b4..ad5e2f66ad 100644
+index 956a5313b4..138243b42a 100644
 --- a/dom/ipc/WindowGlobalChild.h
 +++ b/dom/ipc/WindowGlobalChild.h
 @@ -25,6 +25,7 @@ class WindowGlobalParent;
@@ -177,12 +176,11 @@ index 956a5313b4..ad5e2f66ad 100644
  
  /**
   * Actor for a single nsGlobalWindowInner. This actor is used to communicate
-@@ -143,6 +144,15 @@ class WindowGlobalChild final : public WindowGlobalActor,
+@@ -143,6 +144,14 @@ class WindowGlobalChild final : public WindowGlobalActor,
    dom::BrowsingContext* FindBrowsingContextWithName(
        const nsAString& aName, bool aUseEntryGlobalForAccessCheck = true);
  
 +  already_AddRefed<Promise> DrawElementSnapshot(Element& aElement,
-+                                                double aScale,
 +                                                ErrorResult& aRv);
 +  already_AddRefed<Promise> EncodeElementVideoFrame(
 +      Element& aElement, uint32_t aWidth, uint32_t aHeight,

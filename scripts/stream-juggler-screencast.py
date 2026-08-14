@@ -428,7 +428,10 @@ def _viewport_callback(
 ) -> dict[str, int] | None:
     if value is None:
         return None
-    return parse_viewport(value)
+    try:
+        return parse_viewport(value)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
 
 
 def _validate_range(param_hint: str, value: int | float, lower: int | float, upper: int | float) -> None:

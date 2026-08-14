@@ -613,39 +613,28 @@ nsScreencastService::nsScreencastService() = default;
 nsScreencastService::~nsScreencastService() {
 }
 
-nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aClient, nsIDocShell* aDocShell, bool isVideo, const nsACString& aVideoFileName, uint32_t width, uint32_t height, uint32_t quality, uint32_t viewportWidth, uint32_t viewportHeight, uint32_t offsetTop, bool nativeVideo, uint32_t fps, uint32_t bitrate, const nsACString& codec, nsAString& sessionId) {
+static nsIWidget* WidgetForDocShell(nsIDocShell* aDocShell) {
+  PresShell* presShell = aDocShell->GetPresShell();
+  return presShell ? presShell->GetNearestWidget() : nullptr;
+}
+
+nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aClient, nsIDocShell* aDocShell, bool isVideo, const nsACString& aVideoFileName, uint32_t width, uint32_t height, uint32_t quality, uint32_t viewportWidth, uint32_t viewportHeight, uint32_t offsetTop, nsAString& sessionId) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread(), "Screencast service must be started on the Main thread.");
 
-  PresShell* presShell = aDocShell->GetPresShell();
-  if (!presShell)
-    return NS_ERROR_UNEXPECTED;
-  nsIWidget* widget = presShell->GetNearestWidget();
+  nsIWidget* widget = WidgetForDocShell(aDocShell);
   if (!widget)
     return NS_ERROR_UNEXPECTED;
 
   webrtc::scoped_refptr<webrtc::VideoCaptureModuleEx> capturer = nullptr;
-  if (!nativeVideo) {
-    for (auto& it : mIdToSession) {
-      capturer = it.second->ReuseCapturer(widget);
-      if (capturer)
-        break;
-    }
-    if (!capturer)
-      capturer = CreateWindowCapturer(widget);
-    if (!capturer)
-      return NS_ERROR_FAILURE;
-  } else if (nsIWidget* topLevel = widget->GetTopLevelWidget()) {
-    // A NativeLayerRoot supports exactly one snapshotter (CreateSnapshotter
-    // release-asserts otherwise), so a second native session on the same OS
-    // window must be rejected here instead of crashing the browser.
-    for (auto& it : mIdToSession) {
-      if (it.second->NativeVideoTopLevelWidget() == topLevel) {
-        fprintf(stderr,
-                "A native screencast is already running for this window\n");
-        return NS_ERROR_NOT_AVAILABLE;
-      }
-    }
+  for (auto& it : mIdToSession) {
+    capturer = it.second->ReuseCapturer(widget);
+    if (capturer)
+      break;
   }
+  if (!capturer)
+    capturer = CreateWindowCapturer(widget);
+  if (!capturer)
+    return NS_ERROR_FAILURE;
 
   gfx::IntMargin margin;
   // Screen bounds is the widget location on screen.
@@ -664,7 +653,7 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
 
   nsCString error;
   std::unique_ptr<ScreencastEncoder> encoder;
-  if (isVideo && !nativeVideo) {
+  if (isVideo) {
     encoder = ScreencastEncoder::create(error, PromiseFlatCString(aVideoFileName), width, height, margin);
     if (!encoder) {
       fprintf(stderr, "Failed to create ScreencastEncoder: %s\n", error.get());
@@ -677,7 +666,39 @@ nsresult nsScreencastService::StartVideoRecording(nsIScreencastServiceClient* aC
   NS_ENSURE_SUCCESS(rv, rv);
   sessionId = uid;
 
-  auto session = Session::Create(aClient, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, isVideo ? 0 : quality, nativeVideo, fps, bitrate, codec.EqualsLiteral("h265"), offsetTop);
+  auto session = Session::Create(aClient, widget, std::move(capturer), std::move(encoder), width, height, viewportWidth, viewportHeight, margin, isVideo ? 0 : quality, false, 0, 0, false, offsetTop);
+  if (!session->Start())
+    return NS_ERROR_FAILURE;
+  mIdToSession.emplace(sessionId, std::move(session));
+  return NS_OK;
+}
+
+nsresult nsScreencastService::StartNativeVideoStream(nsIScreencastServiceClient* aClient, nsIDocShell* aDocShell, uint32_t width, uint32_t height, uint32_t viewportWidth, uint32_t viewportHeight, uint32_t offsetTop, uint32_t fps, uint32_t bitrate, const nsACString& codec, nsAString& sessionId) {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "Screencast service must be started on the Main thread.");
+
+  nsIWidget* widget = WidgetForDocShell(aDocShell);
+  if (!widget)
+    return NS_ERROR_UNEXPECTED;
+
+  if (nsIWidget* topLevel = widget->GetTopLevelWidget()) {
+    // A NativeLayerRoot supports exactly one snapshotter (CreateSnapshotter
+    // refuses otherwise), so a second native session on the same OS window
+    // must be rejected instead of silently degrading to the CPU path.
+    for (auto& it : mIdToSession) {
+      if (it.second->NativeVideoTopLevelWidget() == topLevel) {
+        fprintf(stderr,
+                "A native screencast is already running for this window\n");
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+    }
+  }
+
+  nsString uid;
+  nsresult rv = generateUid(uid);
+  NS_ENSURE_SUCCESS(rv, rv);
+  sessionId = uid;
+
+  auto session = Session::Create(aClient, widget, nullptr, nullptr, width, height, viewportWidth, viewportHeight, gfx::IntMargin(), 0, true, fps, bitrate, codec.EqualsLiteral("h265"), offsetTop);
   if (!session->Start())
     return NS_ERROR_FAILURE;
   mIdToSession.emplace(sessionId, std::move(session));

@@ -54,9 +54,11 @@ function patchPageDispatcher(dispatcherModule) {
     const client = {
       onFrame: frame => this._dispatchEvent("screencastFrame", {data: frame.buffer}),
       dispose() {},
-      quality: params.quality,
     };
     this._screencastClient = client;
+    // Raw add: addClient would auto-start the default viewport screencast on
+    // the 0→1 transition. removeClient stays the API so teardown still flows
+    // through Page.stopScreencast.
     this._page.screencast._clients.add(client);
     try {
       const options = {
@@ -94,6 +96,16 @@ function maybePatch(filename, moduleExports) {
     patchPageDispatcher(moduleExports);
 }
 
+function tryPatch(filename, moduleExports) {
+  try {
+    maybePatch(filename, moduleExports);
+  } catch (error) {
+    // Playwright circularly loads dispatchers; a later completed load retries.
+    if (!(error instanceof ReferenceError))
+      throw error;
+  }
+}
+
 const originalLoad = Module._load;
 Module._load = function(request, parent, isMain) {
   let filename;
@@ -103,24 +115,10 @@ Module._load = function(request, parent, isMain) {
     // Let Node produce the original load error below.
   }
   const moduleExports = originalLoad.apply(this, arguments);
-  if (filename) {
-    try {
-      maybePatch(filename, moduleExports);
-    } catch (error) {
-      // Playwright circularly loads dispatchers; the completed outer load retries.
-      if (!(error instanceof ReferenceError))
-        throw error;
-    }
-  }
+  if (filename)
+    tryPatch(filename, moduleExports);
   return moduleExports;
 };
 
-for (const [filename, cached] of Object.entries(require.cache)) {
-  try {
-    maybePatch(filename, cached.exports);
-  } catch (error) {
-    // A later completed module load retries the patch.
-    if (!(error instanceof ReferenceError))
-      throw error;
-  }
-}
+for (const [filename, cached] of Object.entries(require.cache))
+  tryPatch(filename, cached.exports);

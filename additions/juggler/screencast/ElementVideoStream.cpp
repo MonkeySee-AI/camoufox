@@ -372,12 +372,6 @@ RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeSurface(
       StreamError("Native video streaming requires macOS"_ns), __func__);
 }
 
-RefPtr<ElementVideoStream::EncodePromise> ElementVideoStream::EncodeFrame(
-    Frame&&) {
-  return EncodePromise::CreateAndReject(
-      StreamError("Native video streaming requires macOS"_ns), __func__);
-}
-
 #endif  // XP_MACOSX
 
 void ElementVideoStream::Shutdown() {

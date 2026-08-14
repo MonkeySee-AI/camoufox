@@ -923,7 +923,7 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, false, 25, 0, '');
+    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
     this._videoRecordingInfo = { sessionId, file };
     this.emit(PageTarget.Events.ScreencastStarted);
   }
@@ -972,9 +972,9 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    // isVideo=false: `video` selects the native encoder via the nativeVideo
-    // argument; isVideo only ever selects the legacy WebM file recorder.
-    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, video, fps, bitrate, codec);
+    const screencastId = video
+      ? screencastService.startNativeVideoStream(screencastClient, docShell, width, height, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top, fps, bitrate, codec)
+      : screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality, devicePixelRatio * viewport.width, devicePixelRatio * viewport.height, devicePixelRatio * rect.top);
     this._screencastRecordingInfo = { screencastId };
     return { screencastId };
   }

@@ -8,17 +8,17 @@ import base64
 from types import SimpleNamespace
 from typing import Any
 
-import click
-
 from rotunda.async_api import AsyncNewBrowser, async_connect_over_remote_juggler
 
 
 def parse_viewport(value: str) -> dict[str, int]:
+    # Raises ValueError so argparse `type=` call sites report a clean usage
+    # error; click call sites adapt it to BadParameter themselves.
     try:
         width, height = value.lower().split("x", 1)
         return {"width": int(width), "height": int(height)}
     except Exception as exc:
-        raise click.BadParameter("must look like 1280x720") from exc
+        raise ValueError("must look like 1280x720") from exc
 
 
 async def resolve_page(

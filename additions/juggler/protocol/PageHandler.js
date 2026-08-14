@@ -31,9 +31,9 @@ function isHumanizeEnabled() {
 // ticks are skipped instead of queueing frames that are already stale. Mirrors
 // kMaxNativeFramesInFlight in nsScreencastService.cpp.
 const kMaxElementFramesInFlight = 8;
-// Capture failures can be transient (encoder still warming up, an element
-// briefly unmounted by a SPA route change), so the loops only stop after this
-// many consecutive failures — or immediately when the element is detached.
+// Capture failures can be transient (encoder still warming up, a passing
+// IPC or capture error), so the loops only stop after this many consecutive
+// failures. Element detachment is permanent and stops immediately.
 const kMaxConsecutiveCaptureFailures = 60;
 // Empty video frames are the routine no-frame-this-tick signal, so a broken
 // stream that only ever returns empties is caught by elapsed time instead.
@@ -961,12 +961,8 @@ export class PageHandler {
       interval: 1000 / fps,
       timer: null,
       waitingForAck: false,
-      video,
       width,
       height,
-      fps,
-      bitrate,
-      codec,
       startedAt: Date.now(),
       lastFrameIndex: -1,
       lastDataAt: Date.now(),
@@ -986,7 +982,7 @@ export class PageHandler {
     }
     if (this._elementScreencast !== state)
       throw new Error('Screencast was stopped');
-    const capture = state.video ? this._captureElementVideoFrame : this._captureElementPngFrame;
+    const capture = video ? this._captureElementVideoFrame : this._captureElementPngFrame;
     void capture.call(this, state);
     return {screencastId: state.id};
   }
