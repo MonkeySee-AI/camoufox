@@ -59,7 +59,7 @@ index ceb57c0341..d6b2e7abf7 100644
  #include "mozilla/ipc/Endpoint.h"
  #include "nsContentUtils.h"
  #include "nsDocShell.h"
-@@ -796,6 +797,104 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
+@@ -796,6 +797,107 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetExistingActor(
    return JSActorManager::GetExistingActor(aName).downcast<JSWindowActorChild>();
  }
  
@@ -74,8 +74,9 @@ index ceb57c0341..d6b2e7abf7 100644
 +    return promise.forget();
 +  }
 +
-+  gfx::PaintFragment fragment =
-+      gfx::PaintFragment::RecordElement(&aElement, 1.0f);
++  // Still snapshots keep ink overflow so shadows survive the capture.
++  gfx::PaintFragment fragment = gfx::PaintFragment::RecordElement(
++      &aElement, 1.0f, /* aIncludeInkOverflow */ true);
 +  if (fragment.IsEmpty()) {
 +    promise->MaybeReject(NS_ERROR_FAILURE);
 +    return promise.forget();
@@ -116,8 +117,10 @@ index ceb57c0341..d6b2e7abf7 100644
 +    return promise.forget();
 +  }
 +
-+  gfx::PaintFragment fragment =
-+      gfx::PaintFragment::RecordElement(&aElement, 1.0f);
++  // Video frames crop to the border box so pointer input coordinates map
++  // one-to-one onto streamed pixels.
++  gfx::PaintFragment fragment = gfx::PaintFragment::RecordElement(
++      &aElement, 1.0f, /* aIncludeInkOverflow */ false);
 +  if (fragment.IsEmpty()) {
 +    promise->MaybeReject(NS_ERROR_FAILURE);
 +    return promise.forget();
@@ -878,13 +881,14 @@ index baa8899738..611abc62e7 100644
  #include "nsPresContext.h"
  
  static mozilla::LazyLogModule gCrossProcessPaintLog("CrossProcessPaint");
-@@ -175,6 +181,97 @@ PaintFragment PaintFragment::Record(dom::BrowsingContext* aBc,
+@@ -175,6 +181,99 @@ PaintFragment PaintFragment::Record(dom::BrowsingContext* aBc,
    return fragment;
  }
  
 +/* static */
 +PaintFragment PaintFragment::RecordElement(dom::Element* aElement,
-+                                           float aScale) {
++                                           float aScale,
++                                           bool aIncludeInkOverflow) {
 +  if (!aElement || aScale <= 0) {
 +    return PaintFragment{};
 +  }
@@ -897,25 +901,26 @@ index baa8899738..611abc62e7 100644
 +  }
 +  rootFrame = rootFrame->FirstContinuation();
 +
-+  nsRect borderBox;
-+  bool hasBorderBox = false;
++  nsRect bounds;
++  bool hasBounds = false;
 +  for (nsIFrame* frame = rootFrame; frame;
 +       frame = frame->GetNextContinuation()) {
-+    nsRect rect(nsPoint(), frame->GetSize());
++    nsRect rect = aIncludeInkOverflow ? frame->InkOverflowRect()
++                                      : nsRect(nsPoint(), frame->GetSize());
 +    rect.MoveBy(frame->GetOffsetTo(rootFrame));
-+    if (hasBorderBox) {
-+      borderBox.UnionRect(borderBox, rect);
++    if (hasBounds) {
++      bounds.UnionRect(bounds, rect);
 +    } else {
-+      borderBox = rect;
-+      hasBorderBox = true;
++      bounds = rect;
++      hasBounds = true;
 +    }
 +  }
-+  if (!hasBorderBox || borderBox.IsEmpty()) {
++  if (!hasBounds || bounds.IsEmpty()) {
 +    return PaintFragment{};
 +  }
 +
 +  RefPtr<nsPresContext> presContext = rootFrame->PresContext();
-+  CSSIntRect rect = RoundedOut(CSSPixel::FromAppUnits(borderBox));
++  CSSIntRect rect = RoundedOut(CSSPixel::FromAppUnits(bounds));
 +  IntSize surfaceSize(int32_t(std::ceil(rect.width * aScale)),
 +                      int32_t(std::ceil(rect.height * aScale)));
 +  if (surfaceSize.IsEmpty() || !Factory::CheckSurfaceSize(surfaceSize)) {
@@ -1008,12 +1013,15 @@ index 02aee61df2..17bd5711e3 100644
  class Promise;
  class WindowGlobalParent;
  }  // namespace dom
-@@ -75,6 +76,9 @@ class PaintFragment final {
+@@ -75,6 +76,12 @@ class PaintFragment final {
                                nscolor aBackgroundColor,
                                CrossProcessPaintFlags aFlags);
  
-+  /** Records only an element's layout frame and descendants on transparency. */
-+  static PaintFragment RecordElement(dom::Element* aElement, float aScale);
++  /** Records only an element's layout frame and descendants on transparency.
++      aIncludeInkOverflow grows the bounds from the union of continuation
++      border boxes to ink overflow (e.g. box shadows). */
++  static PaintFragment RecordElement(dom::Element* aElement, float aScale,
++                                     bool aIncludeInkOverflow);
 +
    /// Returns whether this paint fragment contains a valid recording.
    bool IsEmpty() const;
