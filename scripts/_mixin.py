@@ -62,7 +62,7 @@ def find_src_dir(root_dir='.', version=None, release=None):
 def get_moz_target(target, arch):
     """Get moz_target from target and arch"""
     if target == "linux":
-        return "aarch64-unknown-linux-gnu" if arch == "arm64" else f"{arch}-pc-linux-gnu"
+        return f"{'aarch64' if arch == 'arm64' else arch}-unknown-linux-gnu"
     if target == "windows":
         return f"{arch}-pc-mingw32"
     if target == "macos":
