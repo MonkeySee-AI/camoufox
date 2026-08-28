@@ -11,7 +11,6 @@ Run:
 
 import hashlib
 import os
-import re
 import shutil
 import shlex
 import subprocess
@@ -21,10 +20,10 @@ from dataclasses import dataclass
 from _mixin import (
     BROWSERBUILD_DIR,
     find_src_dir,
+    get_patch_binary,
     get_moz_target,
     get_options,
     list_patches,
-    patch,
     run,
     temp_cd,
 )
@@ -142,7 +141,8 @@ class Patcher:
         """
         import time
 
-        print(f"\n*** -> patch -p1 -i {patch_file}")
+        patch_bin = get_patch_binary()
+        print(f"\n*** -> {patch_bin} -p1 -i {patch_file}")
         sys.stdout.flush()
 
         # Record time before applying so we only detect .rej files from this patch
@@ -153,8 +153,8 @@ class Patcher:
         # --forward flag: skip patches that appear to be already applied
         # --binary flag: preserve line endings (helps with CRLF vs LF differences)
         # -l flag: ignore whitespace differences
-        result = subprocess.run(
-            ['patch', '-p1', '--forward', '-l', '--binary', '-i', patch_file],
+        subprocess.run(
+            [patch_bin, '-p1', '--forward', '-l', '--binary', '-i', patch_file],
             stdin=sys.stdin,
             stdout=sys.stdout,
             stderr=sys.stderr,

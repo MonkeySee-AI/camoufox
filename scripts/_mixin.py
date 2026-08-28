@@ -116,9 +116,14 @@ def run(cmd, exit_on_fail=True, do_print=True):
     return retval
 
 
+def get_patch_binary():
+    """Prefer GNU patch when Homebrew provides it."""
+    return shutil.which("gpatch") or shutil.which("patch") or "patch"
+
+
 def patch(patchfile, reverse=False, silent=False):
     """Run a patch file"""
-    patch_bin = shutil.which("gpatch") or shutil.which("patch") or "patch"
+    patch_bin = get_patch_binary()
     if reverse:
         cmd = f"{patch_bin} -p1 -R -i {patchfile}"
     else:
@@ -135,6 +140,7 @@ __all__ = [
     'BROWSERBUILD_DIR',
     'PATCHES_DIR',
     'REPO_ROOT',
+    'get_patch_binary',
     'get_moz_target',
     'list_patches',
     'patch',

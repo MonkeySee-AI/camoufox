@@ -26,6 +26,7 @@ def test_patch_prefers_gnu_patch(monkeypatch) -> None:
     monkeypatch.setattr(_mixin.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(_mixin, "run", commands.append)
 
+    assert _mixin.get_patch_binary() == "/bin/gpatch"
     _mixin.patch("feature.patch")
 
     assert commands == ["/bin/gpatch -p1 -i feature.patch"]
