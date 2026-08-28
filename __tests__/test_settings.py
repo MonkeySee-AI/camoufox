@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from rotunda.settings import (
+    ROTUNDA_CONFIG_JSON,
     ROTUNDA_CONFIG_PATH,
     ROTUNDA_DEBUG_DUMP,
     ROTUNDA_DEBUG_DUMP_DIR,
@@ -72,12 +73,14 @@ def test_settings_uses_runtime_compatible_fallbacks_for_bad_env_values() -> None
 
 def test_env_snapshot_uses_central_rotunda_env_name_list() -> None:
     env = {
+        ROTUNDA_CONFIG_JSON: '{"debug":true}',
         ROTUNDA_CONFIG_PATH: "/tmp/profile.json",
         ROTUNDA_DEBUG_DUMP_DIR: "/tmp/debug",
     }
 
     snapshot = env_snapshot(env)
 
+    assert snapshot[ROTUNDA_CONFIG_JSON] == '{"debug":true}'
     assert snapshot[ROTUNDA_CONFIG_PATH] == "/tmp/profile.json"
     assert snapshot[ROTUNDA_DEBUG_DUMP_DIR] == "/tmp/debug"
     assert ROTUNDA_VM_ACCESS_LOG in snapshot

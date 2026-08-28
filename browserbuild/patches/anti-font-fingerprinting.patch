@@ -551,7 +551,7 @@ index 7234240..08ccfce 100644
  
 +mozilla::dom::Document* OffscreenCanvas::GetDocument() const {
 +  if (NS_IsMainThread()) {
-+    if (nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetOwnerGlobal())) {
++    if (nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetRelevantGlobal())) {
 +      return win->GetExtantDoc();
 +    }
 +  }

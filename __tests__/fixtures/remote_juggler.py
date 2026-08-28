@@ -44,6 +44,7 @@ async def launch_remote_juggler(
 ) -> tuple[asyncio.subprocess.Process, str, list[str], list[asyncio.Task[None]]]:
     env = os.environ.copy()
     env.pop("ROTUNDA_CONFIG_PATH", None)
+    env.pop("ROTUNDA_CONFIG_JSON", None)
 
     process = await asyncio.create_subprocess_exec(
         executable_path,

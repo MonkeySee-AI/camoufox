@@ -15,22 +15,35 @@ diff --git a/toolkit/components/search/SearchEngineSelector.sys.mjs b/toolkit/co
 index 85c9d83282..15cfeac054 100644
 --- a/toolkit/components/search/SearchEngineSelector.sys.mjs
 +++ b/toolkit/components/search/SearchEngineSelector.sys.mjs
-@@ -331,6 +331,21 @@ export class SearchEngineSelector {
+@@ -331,6 +331,34 @@ export class SearchEngineSelector {
     *   could be obtained.
     */
    async #getConfiguration(firstTime = true) {
 +    if (true) {
 +      return [
 +        {
-+          "appliesTo": [{
-+            "default": "yes",
-+            "included": {
-+              "everywhere": true
++          recordType: "engine",
++          identifier: "rotunda-disabled",
++          base: {
++            name: "Rotunda Disabled Search",
++            urls: {
++              search: {
++                base: "https://example.invalid/",
++                searchTermParamName: "q",
++              },
 +            },
-+            "webExtension": {
-+              "id": "none@mozilla.org"
-+            }
-+          }],
++          },
++          variants: [{ environment: { allRegionsAndLocales: true } }],
++        },
++        {
++          recordType: "defaultEngines",
++          globalDefault: "rotunda-disabled",
++          globalDefaultPrivate: "rotunda-disabled",
++          specificDefaults: [],
++        },
++        {
++          recordType: "engineOrders",
++          orders: [],
 +        },
 +      ];
 +    }

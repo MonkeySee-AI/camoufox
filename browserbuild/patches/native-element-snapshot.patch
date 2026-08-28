@@ -229,7 +229,7 @@ index b2a1203401..6ebecc8c1e 100644
  #include "mozilla/ipc/ProtocolUtils.h"
  #include "mozilla/net/CookieServiceParent.h"
  #include "mozilla/net/NeckoParent.h"
-@@ -1112,6 +1120,172 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
+@@ -1132,6 +1140,172 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
    return promise.forget();
  }
  
@@ -399,9 +399,9 @@ index b2a1203401..6ebecc8c1e 100644
 +  return IPC_OK();
 +}
 +
- void WindowGlobalParent::DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
-                                               const Maybe<IntRect>& aRect,
-                                               float aScale,
+ void WindowGlobalParent::DrawSnapshotInternal(
+     gfx::CrossProcessPaint* aPaint, const Maybe<IntRect>& aRect, float aScale,
+     nscolor aBackgroundColor, gfx::CrossProcessPaintFlags aFlags) {
 @@ -1590,6 +1764,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
  }
  

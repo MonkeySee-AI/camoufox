@@ -1212,8 +1212,8 @@ index 361f78e..73f0f84 100644
 +  }
 +  presShell->ScrollFrameIntoView(
 +      primaryFrame, Some(rect),
-+      ScrollAxis(WhereToScroll::Center, WhenToScroll::IfNotFullyVisible),
-+      ScrollAxis(WhereToScroll::Center, WhenToScroll::IfNotFullyVisible),
++      AxisScrollParams(WhereToScroll::Center, WhenToScroll::IfNotFullyVisible),
++      AxisScrollParams(WhereToScroll::Center, WhenToScroll::IfNotFullyVisible),
 +      ScrollFlags::ScrollOverflowHidden);
 +  // If a _visual_ scroll update is pending, cancel it; otherwise, it will
 +  // clobber next scroll (e.g. subsequent window.scrollTo(0, 0) wlll break).
@@ -1595,15 +1595,15 @@ index c6d7741..2ecbe83 100644
 +  // Playwright: notify content that mouse event has been received and handled.
 +  nsCOMPtr<nsIObserverService> observerService =
 +      mozilla::services::GetObserverService();
-+  if (observerService && aEvent.mJugglerEventId) {
-+    if (aEvent.mMessage == eMouseUp) {
-+      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mouseup %" PRIu32, aEvent.mJugglerEventId)).get());
-+    } else if (aEvent.mMessage == eMouseDown) {
-+      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mousedown %" PRIu32, aEvent.mJugglerEventId)).get());
-+    } else if (aEvent.mMessage == eMouseMove) {
-+      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mousemove %" PRIu32, aEvent.mJugglerEventId)).get());
-+    } else if (aEvent.mMessage == eContextMenu) {
-+      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("contextmenu %" PRIu32, aEvent.mJugglerEventId)).get());
++  if (observerService && aMouseOrPointerEvent.mJugglerEventId) {
++    if (aMouseOrPointerEvent.mMessage == eMouseUp) {
++      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mouseup %" PRIu32, aMouseOrPointerEvent.mJugglerEventId)).get());
++    } else if (aMouseOrPointerEvent.mMessage == eMouseDown) {
++      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mousedown %" PRIu32, aMouseOrPointerEvent.mJugglerEventId)).get());
++    } else if (aMouseOrPointerEvent.mMessage == eMouseMove) {
++      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("mousemove %" PRIu32, aMouseOrPointerEvent.mJugglerEventId)).get());
++    } else if (aMouseOrPointerEvent.mMessage == eContextMenu) {
++      observerService->NotifyObservers(nullptr, "juggler-mouse-event-hit-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("contextmenu %" PRIu32, aMouseOrPointerEvent.mJugglerEventId)).get());
 +    }
 +  }
  }
