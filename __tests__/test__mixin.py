@@ -13,3 +13,9 @@ from _mixin import get_moz_target  # noqa: E402
 
 def test_x86_64_linux_uses_rust_target_vendor() -> None:
     assert get_moz_target("linux", "x86_64") == "x86_64-unknown-linux-gnu"
+
+
+def test_linux_mozconfig_uses_the_rustc_host() -> None:
+    mozconfig = SCRIPTS_ROOT.parent / "browserbuild" / "assets" / "linux.mozconfig"
+
+    assert 'ac_add_options --host="$(rustc -vV' in mozconfig.read_text()
