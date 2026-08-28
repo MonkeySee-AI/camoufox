@@ -4,7 +4,7 @@
 
 const {Helper} = ChromeUtils.importESModule('chrome://juggler/content/Helper.js');
 const {Preferences} = ChromeUtils.importESModule("resource://gre/modules/Preferences.sys.mjs");
-const {ContextualIdentityService} = ChromeUtils.importESModule("resource://gre/modules/ContextualIdentityService.sys.mjs");
+const {ContextualIdentityService} = ChromeUtils.importESModule("moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs");
 const {NetUtil} = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const {AppConstants} = ChromeUtils.importESModule("resource://gre/modules/AppConstants.sys.mjs");
 
@@ -577,7 +577,7 @@ export class PageTarget {
   }
 
   async activateAndRun(callback = () => {}, { muteNotificationsPopup = false } = {}) {
-    const ownerWindow = this._tab.linkedBrowser.ownerGlobal;
+    const ownerWindow = this._tab.linkedBrowser.documentGlobal;
     const tabBrowser = ownerWindow.gBrowser;
     // Serialize all tab-switching commands per tabbed browser
     // to disallow concurrent tab switching.
@@ -908,7 +908,7 @@ export class PageTarget {
     if (width < 10 || width > 10000 || height < 10 || height > 10000)
       throw new Error("Invalid size");
 
-    const docShell = this._gBrowser.ownerGlobal.docShell;
+    const docShell = this._gBrowser.documentGlobal.docShell;
     // Exclude address bar and navigation control from the video.
     const rect = this.linkedBrowser().getBoundingClientRect();
     const devicePixelRatio = this._window.devicePixelRatio;
@@ -956,7 +956,7 @@ export class PageTarget {
 
     const self = this;
     return {
-      docShell: this._gBrowser.ownerGlobal.docShell,
+      docShell: this._gBrowser.documentGlobal.docShell,
       // Exclude address bar and navigation control from the video.
       rect: this.linkedBrowser().getBoundingClientRect(),
       devicePixelRatio: this._window.devicePixelRatio,

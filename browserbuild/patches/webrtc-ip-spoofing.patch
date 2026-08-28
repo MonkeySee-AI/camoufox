@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..8834c93
 --- /dev/null
 +++ b/dom/base/WebRTCIPManager.cpp
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,147 @@
 +#include "WebRTCIPManager.h"
 +#include "nsTHashMap.h"
 +#include "RoverfoxStorageManager.h"
@@ -14,6 +14,7 @@ index 0000000..8834c93
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "mozilla/dom/Document.h"
 +#include "nsPIDOMWindow.h"
++#include "nsPIDOMWindowInlines.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -389,7 +390,7 @@ index e9afe2c..5467367 100644
  
    SyncToJsep();
  
-@@ -1751,11 +1763,39 @@ already_AddRefed<dom::Promise> PeerConnectionImpl::GetStats(
+@@ -1750,11 +1762,39 @@ already_AddRefed<dom::Promise> PeerConnectionImpl::GetStats(
      MOZ_CRASH("Failed to create a promise!");
    }
  
@@ -428,7 +429,7 @@ index e9afe2c..5467367 100644
 +                }
 +              }
 +            }
-             RefPtr<RTCStatsReport> report(new RTCStatsReport(window));
+             RefPtr report = MakeRefPtr<RTCStatsReport>(window);
              report->Incorporate(*aReport);
              promise->MaybeResolve(std::move(report));
 @@ -3274,12 +3314,22 @@ const std::string& PeerConnectionImpl::GetName() {

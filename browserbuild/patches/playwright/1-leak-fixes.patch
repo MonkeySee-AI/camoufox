@@ -43,7 +43,7 @@ index cf5ae51466..97efc14262 100644
 -    // --- Playwright begin ---
 -    let provider = new PlaywrightPoliciesProvider();
 -    // --- Playwright end ---
-+    let provider = this._chooseProvider();
++    let provider = this._buildProvider();
  
      if (provider.failed) {
        this.status = Ci.nsIEnterprisePolicies.FAILED;

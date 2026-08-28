@@ -245,41 +245,26 @@ class Runtime {
   }
 
   async _awaitPromise(executionContext, obj, exceptionDetails = {}) {
-    if (obj.promiseState === 'fulfilled')
-      return {success: true, obj: obj.promiseValue};
-    if (obj.promiseState === 'rejected') {
-      const debuggee = executionContext._debuggee;
-      exceptionDetails.text = debuggee.executeInGlobalWithBindings('e.message', {e: obj.promiseReason}, {useInnerBindings: true}).return;
-      exceptionDetails.stack = debuggee.executeInGlobalWithBindings('e.stack', {e: obj.promiseReason}, {useInnerBindings: true}).return;
-      return {success: false, obj: null};
-    }
-    let resolve, reject;
-    const promise = new Promise((a, b) => {
-      resolve = a;
-      reject = b;
+    const contextDestroyedError = new Error('Execution context was destroyed!');
+    let rejectOnContextDestroyed;
+    const contextDestroyed = new Promise((_, reject) => rejectOnContextDestroyed = reject);
+    this._pendingPromises.set(obj.promiseID, {
+      reject: rejectOnContextDestroyed,
+      executionContext,
+      contextDestroyedError,
     });
-    this._pendingPromises.set(obj.promiseID, {resolve, reject, executionContext, exceptionDetails});
-    if (this._pendingPromises.size === 1)
-      this._debugger.onPromiseSettled = this._onPromiseSettled.bind(this);
-    return await promise;
-  }
-
-  _onPromiseSettled(obj) {
-    const pendingPromise = this._pendingPromises.get(obj.promiseID);
-    if (!pendingPromise)
-      return;
-    this._pendingPromises.delete(obj.promiseID);
-    if (!this._pendingPromises.size)
-      this._debugger.onPromiseSettled = undefined;
-
-    if (obj.promiseState === 'fulfilled') {
-      pendingPromise.resolve({success: true, obj: obj.promiseValue});
-      return;
-    };
-    const debuggee = pendingPromise.executionContext._debuggee;
-    pendingPromise.exceptionDetails.text = debuggee.executeInGlobalWithBindings('e.message', {e: obj.promiseReason}, {useInnerBindings: true}).return;
-    pendingPromise.exceptionDetails.stack = debuggee.executeInGlobalWithBindings('e.stack', {e: obj.promiseReason}, {useInnerBindings: true}).return;
-    pendingPromise.resolve({success: false, obj: null});
+    try {
+      const value = await Promise.race([obj.unsafeDereference(), contextDestroyed]);
+      return {success: true, obj: executionContext._debuggee.makeDebuggeeValue(value)};
+    } catch (error) {
+      if (error === contextDestroyedError)
+        throw error;
+      exceptionDetails.text = error?.message;
+      exceptionDetails.stack = error?.stack;
+      return {success: false, obj: null};
+    } finally {
+      this._pendingPromises.delete(obj.promiseID);
+    }
   }
 
   createExecutionContext(domWindow, contextGlobal, auxData) {
@@ -300,14 +285,12 @@ class Runtime {
   }
 
   destroyExecutionContext(destroyedContext) {
-    for (const [promiseID, {reject, executionContext}] of this._pendingPromises) {
+    for (const [promiseID, {reject, executionContext, contextDestroyedError}] of this._pendingPromises) {
       if (executionContext === destroyedContext) {
-        reject(new Error('Execution context was destroyed!'));
+        reject(contextDestroyedError);
         this._pendingPromises.delete(promiseID);
       }
     }
-    if (!this._pendingPromises.size)
-      this._debugger.onPromiseSettled = undefined;
     this._debugger.removeDebuggee(destroyedContext._contextGlobal);
     this._executionContexts.delete(destroyedContext._id);
     if (destroyedContext._domWindow)
@@ -389,11 +372,6 @@ class ExecutionContext {
   }
 
   async evaluateFunction(functionText, args, exceptionDetails = {}) {
-    const funEvaluation = this._getResult(this._debuggee.executeInGlobal('(' + functionText + ')'), exceptionDetails);
-    if (!funEvaluation.success)
-      return null;
-    if (!funEvaluation.obj.callable)
-      throw new Error('functionText does not evaluate to a function!');
     args = args.map(arg => {
       if (arg.objectId) {
         if (!this._remoteObjects.has(arg.objectId))
@@ -411,7 +389,14 @@ class ExecutionContext {
     const userInputHelper = this._domWindow ? this._domWindow.windowUtils.setHandlingUserInput(true) : null;
     if (this._domWindow && this._domWindow.document)
       this._domWindow.document.notifyUserGestureActivation();
-    let {success, obj} = this._getResult(funEvaluation.obj.apply(null, args), exceptionDetails);
+    const callBindings = {};
+    const argNames = [];
+    for (let i = 0; i < args.length; i++) {
+      const name = '__pwArg' + i;
+      callBindings[name] = args[i];
+      argNames.push(name);
+    }
+    let {success, obj} = this._getResult(this._debuggee.executeInGlobalWithBindings('(' + functionText + ')(' + argNames.join(',') + ')', callBindings, {useInnerBindings: true, bypassCSP: true}), exceptionDetails);
     userInputHelper && userInputHelper.destruct();
     if (!success)
       return null;

@@ -14,14 +14,10 @@ diff --git a/netwerk/protocol/http/nsHttpHandler.cpp b/netwerk/protocol/http/nsH
 index d0aebdf965..01472ec205 100644
 --- a/netwerk/protocol/http/nsHttpHandler.cpp
 +++ b/netwerk/protocol/http/nsHttpHandler.cpp
-@@ -14,6 +14,7 @@
- #include "nsError.h"
- #include "nsHttp.h"
+@@ -5,2 +5,3 @@
+ // HttpLog.h should generally be included first
  #include "nsHttpHandler.h"
 +#include "MaskConfig.hpp"
- #include "nsHttpChannel.h"
- #include "nsHTTPCompressConv.h"
- #include "nsHttpAuthCache.h"
 @@ -747,6 +748,19 @@ uint8_t nsHttpHandler::UrgencyFromCoSFlags(uint32_t cos) {
  //-----------------------------------------------------------------------------
  

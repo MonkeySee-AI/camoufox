@@ -95,10 +95,10 @@ diff --git a/dom/system/NetworkGeolocationProvider.sys.mjs b/dom/system/NetworkG
 index 7edc62b4a6..19b77aa6b6 100644
 --- a/dom/system/NetworkGeolocationProvider.sys.mjs
 +++ b/dom/system/NetworkGeolocationProvider.sys.mjs
-@@ -356,19 +356,65 @@ NetworkGeolocationProvider.prototype = {
-    } else {
-      Glean.geolocation.geolocationService.network_ip.add();
-    }
+@@ -398,18 +398,64 @@ NetworkGeolocationProvider.prototype = {
+     lazy.log.info(
+       `Sending IP-address-based geolocation request${logStr} to network service: ${url}`
+     );
 +
 +    // Use profile geolocation if configured.
 +    let DEFAULT_DEG = -180;
@@ -120,8 +120,8 @@ index 7edc62b4a6..19b77aa6b6 100644
 +      return num.toString().split(".")[1].length || 0;
 +    };
  
-    let result;
-    try {
+     let result;
+     try {
 -      result = await this.fetchLocation(url, wifiData);
 -      lazy.log.info(
 -        `geo provider reported: ${result.location.lng}:${result.location.lat}`
@@ -167,5 +167,5 @@ index 7edc62b4a6..19b77aa6b6 100644
 +        );
 +      }
 +
-      if (this.listener) {
-        this.listener.update(newLocation);
+       if (this.listener) {
+         this.listener.update(newLocation);

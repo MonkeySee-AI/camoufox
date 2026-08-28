@@ -3,13 +3,14 @@ new file mode 100644
 index 0000000000..abcdef1234
 --- /dev/null
 +++ b/dom/base/SpeechVoicesManager.cpp
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,78 @@
 +/* Rotunda: Per-context speech voices manager */
 +#include "SpeechVoicesManager.h"
 +
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "mozilla/Mutex.h"
 +#include "nsGlobalWindowInner.h"
++#include "nsPIDOMWindowInlines.h"
 +#include "xpcpublic.h"
 +
 +namespace mozilla {

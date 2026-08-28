@@ -327,7 +327,7 @@ export class PageAgent {
   }
 
   _linkClicked(sync, anchorElement) {
-    if (anchorElement.ownerGlobal.docShell !== this._docShell)
+    if (anchorElement.documentGlobal.docShell !== this._docShell)
       return;
     this._browserPage.emit('pageLinkClicked', { phase: sync ? 'after' : 'before' });
   }
@@ -360,9 +360,9 @@ export class PageAgent {
   onWindowEvent(event) {
     if (event.type !== 'DOMContentLoaded' && event.type !== 'load')
       return;
-    if (!event.target.ownerGlobal)
+    if (!event.target.documentGlobal)
       return;
-    const docShell = event.target.ownerGlobal.docShell;
+    const docShell = event.target.documentGlobal.docShell;
     const frame = this._frameTree.frameForDocShell(docShell);
     if (!frame)
       return;
@@ -382,7 +382,7 @@ export class PageAgent {
   }
 
   _onDocumentOpenLoad(document) {
-    const docShell = document.ownerGlobal.docShell;
+    const docShell = document.documentGlobal.docShell;
     const frame = this._frameTree.frameForDocShell(docShell);
     if (!frame)
       return;
@@ -599,9 +599,9 @@ export class PageAgent {
     const {node, video, width, height, fps, bitrate, codec} = screencast;
     return {
       data: video
-        ? await node.ownerGlobal.windowGlobalChild.encodeElementVideoFrame(
+        ? await node.documentGlobal.windowGlobalChild.encodeElementVideoFrame(
             node, width, height, fps, bitrate, codec, frameIndex)
-        : await node.ownerGlobal.windowGlobalChild.drawElementSnapshot(node),
+        : await node.documentGlobal.windowGlobalChild.drawElementSnapshot(node),
     };
   }
 
@@ -609,7 +609,7 @@ export class PageAgent {
     const screencast = this._elementScreencast;
     this._elementScreencast = null;
     if (screencast && screencast.video)
-      await screencast.node.ownerGlobal.windowGlobalChild.stopElementVideoStream();
+      await screencast.node.documentGlobal.windowGlobalChild.stopElementVideoStream();
   }
 
   async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}) {

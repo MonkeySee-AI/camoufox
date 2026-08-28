@@ -187,15 +187,15 @@ index e8b50c6..0c684d2 100644
  void BrowsingContext::DidSet(FieldIndex<IDX_MediumOverride>,
                               nsString&& aOldValue) {
    MOZ_ASSERT(IsTop());
-@@ -3835,7 +3847,7 @@ void BrowsingContext::SetGeolocationServiceOverride(
+@@ -3812,7 +3824,7 @@ void BrowsingContext::SetGeolocationServiceOverride(
    if (aGeolocationOverride.WasPassed()) {
      if (!mGeolocationServiceOverride) {
-       mGeolocationServiceOverride = new nsGeolocationService();
+       mGeolocationServiceOverride = MakeRefPtr<GeolocationService>();
 -      mGeolocationServiceOverride->Init();
 +      mGeolocationServiceOverride->Init(true /* isOverride */);
      }
      mGeolocationServiceOverride->Update(aGeolocationOverride.Value());
-   } else if (RefPtr<nsGeolocationService> serviceOverride =
+   } else if (RefPtr<GeolocationService> serviceOverride =
 diff --git a/docshell/base/BrowsingContext.h b/docshell/base/BrowsingContext.h
 index 02abb6a..ca04e23 100644
 --- a/docshell/base/BrowsingContext.h
@@ -299,10 +299,11 @@ index 69d45a5..7934452 100644
  #include "mozilla/Attributes.h"
  #include "mozilla/AutoRestore.h"
  #include "mozilla/BasePrincipal.h"
-@@ -63,6 +69,7 @@
+@@ -63,6 +69,8 @@
  #include "mozilla/dom/DocGroup.h"
  #include "mozilla/dom/Element.h"
  #include "mozilla/dom/FragmentDirective.h"
++#include "mozilla/GeolocationService.h"
 +#include "mozilla/dom/Geolocation.h"
  #include "mozilla/dom/HTMLAnchorElement.h"
  #include "mozilla/dom/HTMLIFrameElement.h"
@@ -335,7 +336,7 @@ index 69d45a5..7934452 100644
        mAllowAuth(mItemType == typeContent),
        mAllowKeywordFixup(false),
        mDisableMetaRefreshWhenInactive(false),
-@@ -2957,6 +2971,183 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
+@@ -2957,6 +2971,185 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
    return NS_OK;
  }
  
@@ -496,7 +497,8 @@ index 69d45a5..7934452 100644
 +      ToSupports(element), "juggler-file-picker-shown", nullptr);
 +}
 +
-+RefPtr<nsGeolocationService> nsDocShell::GetGeolocationServiceOverride() {
++RefPtr<mozilla::GeolocationService>
++nsDocShell::GetGeolocationServiceOverride() {
 +  return GetRootDocShell()->mGeolocationServiceOverride;
 +}
 +
@@ -504,8 +506,9 @@ index 69d45a5..7934452 100644
 +nsDocShell::SetGeolocationOverride(nsIDOMGeoPosition* aGeolocationOverride) {
 +  if (aGeolocationOverride) {
 +    if (!mGeolocationServiceOverride) {
-+      mGeolocationServiceOverride = new nsGeolocationService();
-+      mGeolocationServiceOverride->Init();
++      mGeolocationServiceOverride =
++          MakeRefPtr<mozilla::GeolocationService>();
++      mGeolocationServiceOverride->Init(true /* isOverride */);
 +    }
 +    mGeolocationServiceOverride->Update(aGeolocationOverride);
 +  } else {
@@ -568,15 +571,15 @@ index 69d45a5..7934452 100644
      return NS_OK;
    }
  
-@@ -12102,6 +12312,8 @@ nsresult nsDocShell::OnLinkClick(
- 
-   nsCOMPtr<nsIRunnable> ev = new OnLinkClickEvent(
-       this, aContent, loadState, noOpenerImplied, aTriggeringPrincipal);
+@@ -12127,6 +12337,8 @@ nsresult nsDocShell::OnLinkClickWithLoadState(
+   RefPtr ev = MakeRefPtr<OnLinkClickEvent>(
+       this, aContent, aLoadState, aNoOpenerImplied, aTriggeringPrincipal);
+   RefPtr<nsIRunnable> runnable = ev;
 +  nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
 +  observerService->NotifyObservers(ToSupports(aContent), "juggler-link-click", nullptr);
-   return Dispatch(ev.forget());
- }
- 
+   nsresult rv = Dispatch(runnable.forget());
+   NS_ENSURE_SUCCESS(rv, Err(rv));
+   return ev;
 diff --git a/docshell/base/nsDocShell.h b/docshell/base/nsDocShell.h
 index ac51e58..f60089e 100644
 --- a/docshell/base/nsDocShell.h
@@ -589,14 +592,6 @@ index ac51e58..f60089e 100644
  #include "mozilla/dom/WindowProxyHolder.h"
  #include "nsCOMPtr.h"
  #include "nsCharsetSource.h"
-@@ -84,6 +85,7 @@ class nsCommandManager;
- class nsDocShellEditorData;
- class nsDOMNavigationTiming;
- class nsDSURIContentListener;
-+class nsGeolocationService;
- class nsGlobalWindowOuter;
- 
- class FramingChecker;
 @@ -397,6 +399,16 @@ class nsDocShell final : public nsDocLoader,
    void SetWillChangeProcess() { mWillChangeProcess = true; }
    bool WillChangeProcess() { return mWillChangeProcess; }
@@ -608,7 +603,7 @@ index ac51e58..f60089e 100644
 +
 +  bool IsBypassCSPEnabled();
 +
-+  RefPtr<nsGeolocationService> GetGeolocationServiceOverride();
++  RefPtr<mozilla::GeolocationService> GetGeolocationServiceOverride();
 +
 +
    // Creates a real network channel (not a DocumentChannel) using the specified
@@ -633,7 +628,7 @@ index ac51e58..f60089e 100644
 +  bool mForceActiveState : 1;
 +  bool mDisallowBFCache : 1;
 +  nsString mLanguageOverride;
-+  RefPtr<nsGeolocationService> mGeolocationServiceOverride;
++  RefPtr<mozilla::GeolocationService> mGeolocationServiceOverride;
 +
    bool mAllowAuth : 1;
    bool mAllowKeywordFixup : 1;
@@ -710,6 +705,17 @@ index 328b752..6b98c45 100644
    if (!fm->IsInActiveWindow(bc)) {
      return false;
    }
+diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
+--- a/dom/base/nsGlobalWindowInner.cpp
++++ b/dom/base/nsGlobalWindowInner.cpp
+@@ -8076,3 +8076,4 @@ void nsGlobalWindowInner::UpdateSharedWorkersLanguageOverride(
+-  Navigator::GetAcceptLanguages(resolvedLanguages, aLanguageOverride.IsEmpty()
+-                                                       ? nullptr
+-                                                       : &aLanguageOverride);
++  nsString languageOverride = NS_ConvertUTF8toUTF16(aLanguageOverride);
++  Navigator::GetAcceptLanguages(aLanguageOverride.IsEmpty() ? nullptr
++                                                            : &languageOverride,
++                                resolvedLanguages);
 diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
 index 2f945e2..9ba987d 100644
 --- a/dom/base/Navigator.cpp
@@ -1346,8 +1352,8 @@ index 20a3ede..9fb873c 100644
        };
  
 -  if (mBehavior != SystemGeolocationPermissionBehavior::NoPrompt) {
-+  RefPtr<nsGeolocationService> gs = nsGeolocationService::GetGeolocationService(
-+      mLocator->GetBrowsingContext());
++  RefPtr<GeolocationService> gs =
++      GeolocationService::GetGeolocationService(mLocator->GetBrowsingContext());
 +
 +  if (mBehavior != SystemGeolocationPermissionBehavior::NoPrompt && !gs->IsOverride()) {
      // Asynchronously present the system dialog or open system preferences
@@ -1357,17 +1363,18 @@ index 20a3ede..9fb873c 100644
      return NS_OK;
    }
  
--  RefPtr<nsGeolocationService> gs = nsGeolocationService::GetGeolocationService(
--      mLocator->GetBrowsingContext());
+-  RefPtr<GeolocationService> gs =
+-      GeolocationService::GetGeolocationService(mLocator->GetBrowsingContext());
    bool canUseCache = false;
    CachedPositionAndAccuracy lastPosition = gs->GetCachedPosition();
    if (lastPosition.position) {
-@@ -721,11 +722,16 @@ NS_INTERFACE_MAP_END
- NS_IMPL_ADDREF(nsGeolocationService)
- NS_IMPL_RELEASE(nsGeolocationService)
- 
--nsresult nsGeolocationService::Init() {
-+nsresult nsGeolocationService::Init(bool isOverride) {
+diff --git a/toolkit/components/geolocation/GeolocationService.cpp b/toolkit/components/geolocation/GeolocationService.cpp
+index 20a3ede..9fb873c 100644
+--- a/toolkit/components/geolocation/GeolocationService.cpp
++++ b/toolkit/components/geolocation/GeolocationService.cpp
+@@ -55,8 +55,13 @@ NS_INTERFACE_MAP_END
+-nsresult GeolocationService::Init() {
++nsresult GeolocationService::Init(bool isOverride) {
    if (!StaticPrefs::geo_enabled()) {
      return NS_ERROR_FAILURE;
    }
@@ -1380,21 +1387,21 @@ index 20a3ede..9fb873c 100644
    if (XRE_IsContentProcess()) {
      return NS_OK;
    }
-@@ -804,6 +810,10 @@ nsresult nsGeolocationService::Init() {
+@@ -135,6 +140,10 @@ nsresult GeolocationService::Init() {
    return NS_OK;
  }
  
-+bool nsGeolocationService::IsOverride() {
++bool GeolocationService::IsOverride() {
 +  return mIsOverride;
 +}
 +
- nsGeolocationService::~nsGeolocationService() = default;
+ GeolocationService::~GeolocationService() = default;
  
  NS_IMETHODIMP
-@@ -947,6 +957,10 @@ bool nsGeolocationService::HighAccuracyRequested() {
+@@ -279,6 +288,10 @@ bool GeolocationService::HighAccuracyRequested() {
  }
  
- void nsGeolocationService::UpdateAccuracy(bool aForceHigh) {
+ void GeolocationService::UpdateAccuracy(bool aForceHigh) {
 +  if (mIsOverride) {
 +    return;
 +  }
@@ -1402,29 +1409,29 @@ index 20a3ede..9fb873c 100644
    bool highRequired = aForceHigh || HighAccuracyRequested();
  
    if (XRE_IsContentProcess()) {
-diff --git a/dom/geolocation/Geolocation.h b/dom/geolocation/Geolocation.h
+diff --git a/toolkit/components/geolocation/GeolocationService.h b/toolkit/components/geolocation/GeolocationService.h
 index 2194983..79c0e97 100644
---- a/dom/geolocation/Geolocation.h
-+++ b/dom/geolocation/Geolocation.h
-@@ -63,7 +63,7 @@ class nsGeolocationService final : public nsIGeolocationUpdate,
+--- a/toolkit/components/geolocation/GeolocationService.h
++++ b/toolkit/components/geolocation/GeolocationService.h
+@@ -43,7 +43,7 @@ class GeolocationService final : public nsIGeolocationService,
  
-   nsGeolocationService() = default;
+   GeolocationService() = default;
  
 -  nsresult Init();
 +  nsresult Init(bool isOverride = false);
  
    // Management of the Geolocation objects
    void AddLocator(mozilla::dom::Geolocation* aLocator);
-@@ -88,6 +88,8 @@ class nsGeolocationService final : public nsIGeolocationUpdate,
+@@ -66,6 +66,8 @@ class GeolocationService final : public nsIGeolocationService,
    void UpdateAccuracy(bool aForceHigh = false);
    bool HighAccuracyRequested();
  
 +  bool IsOverride();
 +
   private:
-   ~nsGeolocationService();
+   ~GeolocationService();
  
-@@ -114,6 +116,8 @@ class nsGeolocationService final : public nsIGeolocationUpdate,
+@@ -92,6 +94,8 @@ class GeolocationService final : public nsIGeolocationService,
    // Nothing() if not being started, or a boolean reflecting the requested
    // accuracy.
    mozilla::Maybe<bool> mStarting;
@@ -1432,7 +1439,7 @@ index 2194983..79c0e97 100644
 +  bool mIsOverride = false;
  };
  
- namespace mozilla::dom {
+ }  // namespace mozilla
 diff --git a/dom/html/HTMLInputElement.cpp b/dom/html/HTMLInputElement.cpp
 index e3698a2..dce23cb 100644
 --- a/dom/html/HTMLInputElement.cpp
@@ -2052,6 +2059,14 @@ index 0a8e4ac..c73d686 100644
  template <typename Func>
  void RuntimeService::BroadcastAllWorkers(const Func& aFunc) {
    AssertIsOnMainThread();
+@@ -2303,3 +2309,4 @@ void RuntimeService::UpdateWorkersLanguageOverride(
+-  Navigator::GetAcceptLanguages(resolvedLanguages, aLanguageOverride.IsEmpty()
+-                                                       ? nullptr
+-                                                       : &aLanguageOverride);
++  nsString languageOverride = NS_ConvertUTF8toUTF16(aLanguageOverride);
++  Navigator::GetAcceptLanguages(aLanguageOverride.IsEmpty() ? nullptr
++                                                            : &languageOverride,
++                                resolvedLanguages);
 @@ -2481,6 +2487,14 @@ void PropagateStorageAccessPermissionGrantedToWorkers(
    }
  }
@@ -2133,7 +2148,13 @@ index 0460a81..6f88f1f 100644
  void WorkerPrivate::UpdateLanguages(const nsTArray<nsString>& aLanguages) {
    AssertIsOnParentThread();
  
-@@ -6063,6 +6085,15 @@ void WorkerPrivate::UpdateContextOptionsInternal(
+@@ -3641,2 +3663,3 @@ nsresult WorkerPrivate::GetLoadInfo(
+-        Navigator::GetAcceptLanguages(loadInfo.mLanguageOverride,
+-                                      &languageOverride);
++        nsString languageOverrideWide = NS_ConvertUTF8toUTF16(languageOverride);
++        Navigator::GetAcceptLanguages(&languageOverrideWide,
++                                      loadInfo.mLanguageOverride);
+@@ -6063,6 +6086,15 @@ void WorkerPrivate::UpdateContextOptionsInternal(
    }
  }
  
@@ -2578,12 +2599,14 @@ diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
 index 1f9613b..0346bcc 100644
 --- a/layout/style/nsMediaFeatures.cpp
 +++ b/layout/style/nsMediaFeatures.cpp
-@@ -322,6 +322,20 @@ bool Gecko_MediaFeatures_MacRTL(const Document* aDocument) {
+@@ -322,6 +322,22 @@ bool Gecko_MediaFeatures_MacRTL(const Document* aDocument) {
  // as a signal.
  StylePrefersContrast Gecko_MediaFeatures_PrefersContrast(
      const Document* aDocument) {
 +  if (auto* bc = aDocument->GetBrowsingContext()) {
 +    switch (bc->Top()->PrefersContrastOverride()) {
++      case dom::PrefersContrastOverride::None:
++        break;
 +      case dom::PrefersContrastOverride::No_preference:
 +        return StylePrefersContrast::NoPreference;
 +      case dom::PrefersContrastOverride::Less:
@@ -2935,14 +2958,14 @@ index da12049..2462113 100644
        ? // eslint-disable-next-line mozilla/valid-lazy
          lazy.gServerURL
        : AppConstants.REMOTE_SETTINGS_SERVER_URLS[0];
-@@ -113,6 +113,9 @@ export var Utils = {
+@@ -119,6 +119,9 @@ export var Utils = {
    log,
  
-   get shouldSkipRemoteActivityDueToTests() {
+   get shouldSkipRemoteActivity() {
 +    // Playwright does not set Cu.isInAutomation, hence we just return true
 +    // here in order to disable the remote activity.
 +    return true;
-     return (
+     if (
        (lazy.isRunningTests || Cu.isInAutomation) &&
        this.SERVER_URL == "data:,#remote-settings-dummy/v1"
 diff --git a/toolkit/components/browser/nsIWebBrowserChrome.idl b/toolkit/components/browser/nsIWebBrowserChrome.idl
@@ -2967,14 +2990,14 @@ index 0d081a0..647db4d 100644
        Services.prefs.clearUserPref(PREF_POLICIES_APPLIED);
      }
  
--    let provider = this._chooseProvider();
+-    let provider = this._buildProvider();
 +    // --- Playwright begin ---
 +    let provider = new PlaywrightPoliciesProvider();
 +    // --- Playwright end ---
  
      if (provider.failed) {
        this.status = Ci.nsIEnterprisePolicies.FAILED;
-@@ -687,6 +689,19 @@ class JSONPoliciesProvider {
+@@ -758,6 +760,19 @@ class JSONPoliciesProvider {
    }
  }
  
@@ -2991,9 +3014,9 @@ index 0d081a0..647db4d 100644
 +  }
 +}
 +
- class WindowsGPOPoliciesProvider {
+ class WindowsGPOPoliciesProvider extends PoliciesProvider {
    constructor() {
-     this._policies = null;
+     super();
 diff --git a/toolkit/components/resistfingerprinting/nsUserCharacteristics.cpp b/toolkit/components/resistfingerprinting/nsUserCharacteristics.cpp
 index 0630009..f190383 100644
 --- a/toolkit/components/resistfingerprinting/nsUserCharacteristics.cpp
@@ -3395,15 +3418,13 @@ diff --git a/widget/headless/HeadlessCompositorWidget.cpp b/widget/headless/Head
 index cbaa021..6cf72e6 100644
 --- a/widget/headless/HeadlessCompositorWidget.cpp
 +++ b/widget/headless/HeadlessCompositorWidget.cpp
-@@ -2,6 +2,8 @@
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+@@ -5,4 +5,6 @@
+ #include "HeadlessCompositorWidget.h"
  
 +#include "mozilla/gfx/2D.h"
 +#include "mozilla/layers/CompositorThread.h"
- #include "mozilla/widget/PlatformWidgetTypes.h"
- #include "HeadlessCompositorWidget.h"
  #include "VsyncDispatcher.h"
+ #include "mozilla/widget/PlatformWidgetTypes.h"
 @@ -14,9 +16,30 @@ HeadlessCompositorWidget::HeadlessCompositorWidget(
      const layers::CompositorOptions& aOptions, HeadlessWidget* aWindow)
      : CompositorWidget(aOptions),
@@ -3499,14 +3520,14 @@ diff --git a/widget/headless/HeadlessCompositorWidget.h b/widget/headless/Headle
 index 8374cd0..0345d19 100644
 --- a/widget/headless/HeadlessCompositorWidget.h
 +++ b/widget/headless/HeadlessCompositorWidget.h
-@@ -5,6 +5,7 @@
- #ifndef widget_headless_HeadlessCompositorWidget_h
- #define widget_headless_HeadlessCompositorWidget_h
+@@ -7,6 +7,7 @@
  
+ #include "HeadlessWidget.h"
 +#include "mozilla/ReentrantMonitor.h"
  #include "mozilla/widget/CompositorWidget.h"
  
- #include "HeadlessWidget.h"
+ namespace mozilla {
+ namespace widget {
 @@ -22,8 +23,11 @@ class HeadlessCompositorWidget final : public CompositorWidget,
                             HeadlessWidget* aWindow);
  

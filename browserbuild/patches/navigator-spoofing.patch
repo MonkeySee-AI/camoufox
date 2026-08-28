@@ -3,26 +3,17 @@ new file mode 100644
 index 0000000000..37a1713159
 --- /dev/null
 +++ b/dom/base/NavigatorManager.cpp
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,69 @@
 +/* Rotunda: Per-context navigator property manager */
 +#include "NavigatorManager.h"
 +
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "nsGlobalWindowInner.h"
++#include "nsPIDOMWindowInlines.h"
 +#include "xpcpublic.h"
 +
 +namespace mozilla {
 +namespace dom {
-+
-+static uint32_t GetUserContextId(JSObject* aObj) {
-+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
-+  if (!win) return 0;
-+  uint32_t id = 0;
-+  if (BrowsingContext* bc = win->GetBrowsingContext()) {
-+    id = bc->OriginAttributesRef().mUserContextId;
-+  }
-+  return id;
-+}
 +
 +static bool IsDisabled(const char* aPrefix, uint32_t aId) {
 +  nsAutoString dKey;

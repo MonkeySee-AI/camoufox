@@ -450,7 +450,7 @@ export class PageHandler {
       }
     }
 
-    const win = browsingContext.topChromeWindow.ownerGlobal;
+    const win = browsingContext.topChromeWindow;
     const canvas = win.document.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
@@ -585,7 +585,7 @@ export class PageHandler {
     const win = this._pageTarget._window;
     const notifyCursorOverlay = (eventType, chromeX, chromeY) => {
       try {
-        const overlayWin = this._pageTarget._linkedBrowser.ownerGlobal || win;
+        const overlayWin = this._pageTarget._linkedBrowser.documentGlobal || win;
         if (typeof overlayWin.__rotundaSetCursorOverlay === 'function') {
           overlayWin.__rotundaSetCursorOverlay(chromeX, chromeY, eventType);
           return;
