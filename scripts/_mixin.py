@@ -10,6 +10,7 @@ import fnmatch
 import optparse
 import os
 import re
+import shutil
 import sys
 import time
 
@@ -117,10 +118,11 @@ def run(cmd, exit_on_fail=True, do_print=True):
 
 def patch(patchfile, reverse=False, silent=False):
     """Run a patch file"""
+    patch_bin = shutil.which("gpatch") or shutil.which("patch") or "patch"
     if reverse:
-        cmd = f"patch -p1 -R -i {patchfile}"
+        cmd = f"{patch_bin} -p1 -R -i {patchfile}"
     else:
-        cmd = f"patch -p1 -i {patchfile}"
+        cmd = f"{patch_bin} -p1 -i {patchfile}"
     if silent:
         cmd += ' > /dev/null'
     else:
