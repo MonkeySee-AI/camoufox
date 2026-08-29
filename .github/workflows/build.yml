@@ -504,13 +504,33 @@ jobs:
         env:
           ROTUNDA_EXECUTABLE_PATH: ${{ steps.artifact.outputs.executable_path }}
           STOCK_FIREFOX_EXECUTABLE_PATH: ${{ steps.stock-firefox.outputs.executable_path }}
+          TARGET: ${{ matrix.target }}
+          HEADLESS: "1"
         run: |
-          uv run --package rotunda-tests --group playwright-tests --locked pytest \
-            --integration \
-            --headless \
-            __tests__/build-tester/ \
-            __tests__/playwright/async/ \
-            __tests__/service-tester/
+          set -euo pipefail
+
+          run_tests() {
+            uv run --package rotunda-tests --group playwright-tests --locked pytest \
+              --integration \
+              --timeout=180 \
+              "$@"
+          }
+
+          if [[ "$TARGET" == "macos" ]]; then
+            # Firefox can exhaust a macOS 26 runner in one long session, so
+            # bounded batches restart the browser without dropping coverage.
+            run_tests __tests__/build-tester/
+            playwright_tests=(__tests__/playwright/async/test_*.py)
+            for ((index = 0; index < ${#playwright_tests[@]}; index += 5)); do
+              run_tests "${playwright_tests[@]:index:5}"
+            done
+            run_tests __tests__/service-tester/
+          else
+            run_tests \
+              __tests__/build-tester/ \
+              __tests__/playwright/async/ \
+              __tests__/service-tester/
+          fi
 
   prepare-playwright-compat:
     needs: prepare-release
