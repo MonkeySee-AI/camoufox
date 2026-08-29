@@ -71,14 +71,14 @@ diff --git a/gfx/layers/NativeLayerCA.mm b/gfx/layers/NativeLayerCA.mm
 index 894b06c7a3..1288cfa4a3 100644
 --- a/gfx/layers/NativeLayerCA.mm
 +++ b/gfx/layers/NativeLayerCA.mm
-@@ -28,6 +28,7 @@
+@@ -27,6 +27,7 @@
  #include "GLContextProvider.h"
  #include "MozFramebuffer.h"
- #include "mozilla/gfx/Swizzle.h"
+ #include "ScopedGLHelpers.h"
 +#include "SharedSurfaceIO.h"
- #include "mozilla/layers/ScreenshotGrabber.h"
- #include "mozilla/layers/SurfacePoolCA.h"
  #include "mozilla/StaticPrefs_gfx.h"
+ #include "mozilla/gfx/Swizzle.h"
+ #include "mozilla/glean/GfxMetrics.h"
 @@ -327,9 +328,12 @@ static void EmitTelemetryForVideoLowPower(VideoLowPowerType aVideoLowPower) {
  UniquePtr<NativeLayerRootSnapshotter> NativeLayerRootCA::CreateSnapshotter() {
  #ifdef XP_MACOSX

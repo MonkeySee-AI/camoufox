@@ -1611,4 +1611,6 @@ def test_get_asset_by_name_returns_packaged_path(modules: tuple[Any, Any, Any]) 
 
 def _decode_rotunda_config(env: Dict[str, Any]) -> Dict[str, Any]:
     with open(env["ROTUNDA_CONFIG_PATH"], encoding="utf-8") as handle:
-        return json.load(handle)
+        profile = json.load(handle)
+    assert json.loads(env["ROTUNDA_CONFIG_JSON"]) == profile
+    return profile

@@ -205,7 +205,7 @@ jobs:
         if: matrix.target == 'macos'
         run: |
           brew update
-          brew install aria2 ccache
+          brew install aria2 ccache gpatch
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -358,6 +358,7 @@ jobs:
           #   runner_fast: macos-26-large
 
     runs-on: ${{ needs.prepare-release.outputs.runner_profile == 'fast' && matrix.runner_fast || matrix.runner }}
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -510,13 +511,6 @@ jobs:
             __tests__/build-tester/ \
             __tests__/playwright/async/ \
             __tests__/service-tester/
-
-      - name: Debug failed integration over SSH
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 60
-        with:
-          limit-access-to-actor: true
 
   prepare-playwright-compat:
     needs: prepare-release

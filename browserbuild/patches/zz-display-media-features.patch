@@ -1,5 +1,5 @@
 diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
-index 5362dd77d4..8d0f150c01 100644
+index be5c5dc..f85c472 100644
 --- a/layout/style/nsMediaFeatures.cpp
 +++ b/layout/style/nsMediaFeatures.cpp
 @@ -4,6 +4,9 @@
@@ -12,7 +12,7 @@ index 5362dd77d4..8d0f150c01 100644
  #include "PreferenceSheet.h"
  #include "mozilla/GeckoBindings.h"
  #include "mozilla/LookAndFeel.h"
-@@ -35,6 +36,23 @@ using namespace mozilla;
+@@ -35,6 +38,23 @@ using namespace mozilla;
  using mozilla::dom::DisplayMode;
  using mozilla::dom::Document;
  
@@ -36,7 +36,7 @@ index 5362dd77d4..8d0f150c01 100644
  // A helper for four features below
  static nsSize GetSize(const Document& aDocument) {
    nsPresContext* pc = aDocument.GetPresContext();
-@@ -164,6 +179,12 @@ int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
+@@ -164,6 +184,12 @@ int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
  }
  
  StyleColorGamut Gecko_MediaFeatures_ColorGamut(const Document* aDocument) {
@@ -49,7 +49,7 @@ index 5362dd77d4..8d0f150c01 100644
    auto* dx = GetDeviceContextFor(aDocument);
    if (!dx || aDocument->ShouldResistFingerprinting(RFPTarget::CSSColorInfo)) {
      return StyleColorGamut::Srgb;
-@@ -185,6 +206,17 @@ int32_t Gecko_MediaFeatures_GetColorDepth(const Document* aDocument) {
+@@ -185,6 +211,17 @@ int32_t Gecko_MediaFeatures_GetColorDepth(const Document* aDocument) {
      return 0;
    }
  
@@ -67,7 +67,7 @@ index 5362dd77d4..8d0f150c01 100644
    // Use depth of 24 when resisting fingerprinting, or when we're not being
    // rendered.
    int32_t depth = 24;
-@@ -371,6 +403,12 @@ StyleScripting Gecko_MediaFeatures_Scripting(const Document* aDocument) {
+@@ -389,6 +426,12 @@ StyleScripting Gecko_MediaFeatures_Scripting(const Document* aDocument) {
  }
  
  StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
@@ -80,7 +80,7 @@ index 5362dd77d4..8d0f150c01 100644
    // Bug 1759772: Once HDR color is available, update each platform
    // LookAndFeel implementation to return StyleDynamicRange::High when
    // appropriate.
-@@ -379,6 +417,12 @@ StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
+@@ -397,6 +440,12 @@ StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
  
  StyleDynamicRange Gecko_MediaFeatures_VideoDynamicRange(
      const Document* aDocument) {
@@ -90,6 +90,6 @@ index 5362dd77d4..8d0f150c01 100644
 +    }
 +  }
 +
-   if (aDocument->ShouldResistFingerprinting(RFPTarget::CSSVideoDynamicRange) ||
-       !StaticPrefs::layout_css_video_dynamic_range_allows_high()) {
+   if (aDocument->ShouldResistFingerprinting(RFPTarget::CSSVideoDynamicRange)) {
      return StyleDynamicRange::Standard;
+   }

@@ -10,6 +10,7 @@ import fnmatch
 import optparse
 import os
 import re
+import shutil
 import sys
 import time
 
@@ -62,7 +63,7 @@ def find_src_dir(root_dir='.', version=None, release=None):
 def get_moz_target(target, arch):
     """Get moz_target from target and arch"""
     if target == "linux":
-        return "aarch64-unknown-linux-gnu" if arch == "arm64" else f"{arch}-pc-linux-gnu"
+        return f"{'aarch64' if arch == 'arm64' else arch}-unknown-linux-gnu"
     if target == "windows":
         return f"{arch}-pc-mingw32"
     if target == "macos":
@@ -115,12 +116,18 @@ def run(cmd, exit_on_fail=True, do_print=True):
     return retval
 
 
+def get_patch_binary():
+    """Prefer GNU patch when Homebrew provides it."""
+    return shutil.which("gpatch") or shutil.which("patch") or "patch"
+
+
 def patch(patchfile, reverse=False, silent=False):
     """Run a patch file"""
+    patch_bin = get_patch_binary()
     if reverse:
-        cmd = f"patch -p1 -R -i {patchfile}"
+        cmd = f"{patch_bin} -p1 -R -i {patchfile}"
     else:
-        cmd = f"patch -p1 -i {patchfile}"
+        cmd = f"{patch_bin} -p1 -i {patchfile}"
     if silent:
         cmd += ' > /dev/null'
     else:
@@ -133,6 +140,7 @@ __all__ = [
     'BROWSERBUILD_DIR',
     'PATCHES_DIR',
     'REPO_ROOT',
+    'get_patch_binary',
     'get_moz_target',
     'list_patches',
     'patch',

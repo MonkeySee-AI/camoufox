@@ -82,7 +82,8 @@ RefPtr<MacIOSurface> CreateOutputSurface(const gfx::IntSize& aOutputSize) {
       gfx::IntSize(aOutputSize.width / 2, aOutputSize.height / 2),
       gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT,
       gfx::YUVColorSpace::BT709, gfx::TransferFunction::BT709,
-      gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8);
+      gfx::ColorRange::LIMITED, gfx::ColorDepth::COLOR_8,
+      MacIOSurface::AllowAlpha::No);
 }
 
 Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
@@ -122,7 +123,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderFrame(
                               contentSize.width, contentSize.height);
 
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
-      contentSize.width, contentSize.height, false);
+      contentSize.width, contentSize.height, MacIOSurface::AllowAlpha::No);
   if (!staging || !staging->Lock(false)) {
     return Err(StreamError("Could not lock an IOSurface video frame"_ns));
   }
@@ -174,7 +175,7 @@ Result<RefPtr<layers::Image>, MediaResult> RenderSurface(
   // platform encoder; headed capture enters through RenderIOSurface instead.
   const gfx::IntSize sourceSize = aSource->GetSize();
   RefPtr<MacIOSurface> staging = MacIOSurface::CreateIOSurface(
-      sourceSize.width, sourceSize.height, false);
+      sourceSize.width, sourceSize.height, MacIOSurface::AllowAlpha::No);
   if (!staging || !staging->Lock(false)) {
     return Err(StreamError("Could not lock a viewport IOSurface"_ns));
   }

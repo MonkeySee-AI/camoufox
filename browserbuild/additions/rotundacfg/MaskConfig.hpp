@@ -1,5 +1,5 @@
 /*
-Helper to extract values from the ROTUNDA_CONFIG_PATH runtime profile.
+Helper to extract values from the Rotunda runtime profile.
 Written by daijro.
 */
 
@@ -53,32 +53,34 @@ inline const nlohmann::json& GetJson() {
   static nlohmann::json jsonConfig;
 
   std::call_once(initFlag, []() {
-    auto configPath = get_env_utf8("ROTUNDA_CONFIG_PATH");
-    if (!configPath || configPath->empty()) {
+    auto jsonString = get_env_utf8("ROTUNDA_CONFIG_JSON");
+    if (!jsonString || jsonString->empty()) {
+      auto configPath = get_env_utf8("ROTUNDA_CONFIG_PATH");
+      if (!configPath || configPath->empty()) {
+        jsonConfig = nlohmann::json{};
+        return;
+      }
+
+      std::ifstream configFile(*configPath, std::ios::in | std::ios::binary);
+      if (!configFile) {
+        printf_stderr("ERROR: Could not open ROTUNDA_CONFIG_PATH: %s\n",
+                      configPath->c_str());
+        jsonConfig = nlohmann::json{};
+        return;
+      }
+
+      std::ostringstream buffer;
+      buffer << configFile.rdbuf();
+      jsonString = buffer.str();
+    }
+
+    if (!nlohmann::json::accept(*jsonString)) {
+      printf_stderr("ERROR: Invalid Rotunda runtime profile JSON\n");
       jsonConfig = nlohmann::json{};
       return;
     }
 
-    std::ifstream configFile(*configPath, std::ios::in | std::ios::binary);
-    if (!configFile) {
-      printf_stderr("ERROR: Could not open ROTUNDA_CONFIG_PATH: %s\n",
-                    configPath->c_str());
-      jsonConfig = nlohmann::json{};
-      return;
-    }
-
-    std::ostringstream buffer;
-    buffer << configFile.rdbuf();
-    std::string jsonString = buffer.str();
-
-    if (!nlohmann::json::accept(jsonString)) {
-      printf_stderr("ERROR: Invalid JSON passed to ROTUNDA_CONFIG_PATH: %s\n",
-                    configPath->c_str());
-      jsonConfig = nlohmann::json{};
-      return;
-    }
-
-    jsonConfig = nlohmann::json::parse(jsonString);
+    jsonConfig = nlohmann::json::parse(*jsonString);
   });
 
   return jsonConfig;
@@ -90,7 +92,8 @@ inline const rotundacfg::RotundaProfile& Profile() {
 
   std::call_once(initFlag, []() {
     if (!profile.fromJson(GetJson())) {
-      printf_stderr("ERROR: ROTUNDA_CONFIG_PATH does not match RotundaProfile\n");
+      printf_stderr(
+          "ERROR: Rotunda runtime profile does not match RotundaProfile\n");
       profile = rotundacfg::RotundaProfile();
     }
   });

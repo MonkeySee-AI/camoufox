@@ -20,6 +20,7 @@
     "DontCheckDefaultBrowser": true,
     "DisableFirefoxAccounts": true,
     "DisableFormHistory": true,
+    "DefaultSerialGuardSetting": 3,
     "HardwareAcceleration": false,
     "WindowsSSO": false,
     "PasswordManagerEnabled": false,

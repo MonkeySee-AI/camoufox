@@ -1,6 +1,6 @@
 # Fingerprint Debugging Notes
 
-Last updated: 2026-05-05 PDT
+Last updated: 2026-07-20 PDT
 
 This file captures practical debugging notes from investigating why
 `https://demo.fingerprint.com/playground` reports `developer_tools: true`.
@@ -17,7 +17,7 @@ BUILD_TARGET=macos,arm64 make build
 The built executable is:
 
 ```text
-rotunda-150.0.1-beta.25/obj-aarch64-apple-darwin/dist/Rotunda.app/Contents/MacOS/rotunda
+rotunda-154.0.1-beta.25/obj-aarch64-apple-darwin/dist/Rotunda.app/Contents/MacOS/rotunda
 ```
 
 Launch through the Python/Rotunda path when validating fingerprint behavior.
@@ -199,7 +199,7 @@ substitutions for this case; that changes resolver behavior instead of letting
 stock Firefox resolve the same aliases it normally accepts.
 
 One more PixelScan mismatch can hide in the Python context path. `launch_options`
-may build a Firefox 150 user agent, but `NewContext(browser, fingerprint=fp)`
+may build a Firefox 154 user agent, but `NewContext(browser, fingerprint=fp)`
 used to preserve the BrowserForge skeleton's original Firefox version unless
 `ff_version` was passed again. Derive the major version from the launched
 Playwright browser when `ff_version` is omitted, so HTTP and navigator versions
@@ -379,7 +379,7 @@ from rotunda import Rotunda, NewContext
 from rotunda.fingerprints import generate_fingerprint
 
 exe = Path(
-    "rotunda-150.0.1-beta.25/"
+    "rotunda-154.0.1-beta.25/"
     "obj-aarch64-apple-darwin/dist/Rotunda.app/Contents/MacOS/rotunda"
 ).resolve()
 
@@ -389,7 +389,7 @@ with Rotunda(
     headless=False,
     executable_path=str(exe),
     fingerprint=fp,
-    ff_version=150,
+    ff_version=154,
     i_know_what_im_doing=True,
     env=os.environ.copy(),
     config={"showcursor": False},

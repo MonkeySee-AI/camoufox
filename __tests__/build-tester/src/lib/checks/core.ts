@@ -538,12 +538,12 @@ export async function runCoreChecks(): Promise<
         : "PRESENT (Chrome-only)",
   };
 
-  result.firefoxAPIs.noWebSerial = {
-    passed: typeof (navigator as any).serial === "undefined",
+  result.firefoxAPIs.webSerialPresence = {
+    passed: typeof (navigator as any).serial !== "undefined",
     detail:
-      typeof (navigator as any).serial === "undefined"
-        ? "Not present (correct)"
-        : "PRESENT (Chrome-only)",
+      typeof (navigator as any).serial !== "undefined"
+        ? "Present (correct for Firefox 154)"
+        : "MISSING (should exist in Firefox 154)",
   };
 
   result.firefoxAPIs.hasBuildID = {

@@ -271,8 +271,8 @@ export async function runExtendedChecks(
           surface.localAi.modelContextPresent,
       };
 
-      result.firefox150Surfaces.documentPictureInPictureDisabled = {
-        passed: !surface.documentPictureInPicture.present,
+      result.firefox150Surfaces.documentPictureInPicturePresence = {
+        passed: surface.documentPictureInPicture.present,
         detail:
           "documentPictureInPicture present=" +
           surface.documentPictureInPicture.present,

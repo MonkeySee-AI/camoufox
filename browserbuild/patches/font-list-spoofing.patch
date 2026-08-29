@@ -3,13 +3,14 @@ new file mode 100644
 index 0000000000..abcdef0001
 --- /dev/null
 +++ b/dom/base/FontListManager.cpp
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,86 @@
 +/* Rotunda: Per-context font list manager */
 +#include "FontListManager.h"
 +
 +#include "mozilla/Mutex.h"
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "nsGlobalWindowInner.h"
++#include "nsPIDOMWindowInlines.h"
 +#include "xpcpublic.h"
 +
 +namespace mozilla {

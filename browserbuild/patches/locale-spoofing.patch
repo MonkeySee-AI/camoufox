@@ -1,26 +1,15 @@
-diff --git a/intl/components/moz.build b/intl/components/moz.build
-index xxxxxxxxxx..yyyyyyyyyy 100644
---- a/intl/components/moz.build
-+++ b/intl/components/moz.build
-@@ -72,6 +72,7 @@ if not CONFIG["JS_STANDALONE"]:
- 
- LOCAL_INCLUDES += [
-     "/intl/icu_capi/bindings/cpp",
-+    "/rotundacfg",
- ]
- 
- if not CONFIG["MOZ_SYSTEM_ICU"]:
 diff --git a/browser/base/content/browser-init.js b/browser/base/content/browser-init.js
-index 2456c5b4c6..826404b1b7 100644
+index cca7b67..ee0d1a9 100644
 --- a/browser/base/content/browser-init.js
 +++ b/browser/base/content/browser-init.js
-@@ -109,6 +109,22 @@ var gBrowserInit = {
+@@ -237,6 +237,24 @@ var gBrowserInit = {
+     // correctly.
      window.TabBarVisibility.update();
-     TabsInTitlebar.init();
  
 +    // If a list of languages were passed, use them.
-+    let rotundaLocale = ChromeUtils.rotundaGetString("locale.all")
-+      || ChromeUtils.rotundaGetString("navigator.language");
++    let rotundaLocale =
++      ChromeUtils.rotundaGetString("locale.all") ||
++      ChromeUtils.rotundaGetString("navigator.language");
 +    // If locale.all was NOT passed, but locale.language and locale.region was,
 +    // fall back to it instead.
 +    if (!rotundaLocale) {
@@ -31,17 +20,30 @@ index 2456c5b4c6..826404b1b7 100644
 +      }
 +    }
 +    // Set the locale if it was found.
-+    if (rotundaLocale)
++    if (rotundaLocale) {
 +      Services.prefs.setCharPref("intl.accept_languages", rotundaLocale);
++    }
 +
-     new LightweightThemeConsumer(document);
- 
      if (
+       Services.prefs.getBoolPref(
+         "toolkit.legacyUserProfileCustomizations.windowIcon",
+diff --git a/intl/components/moz.build b/intl/components/moz.build
+index a3319c7..6594778 100644
+--- a/intl/components/moz.build
++++ b/intl/components/moz.build
+@@ -72,6 +72,7 @@ if not CONFIG["JS_STANDALONE"]:
+ 
+ LOCAL_INCLUDES += [
+     "/intl/icu_capi/bindings/cpp",
++    "/rotundacfg",
+ ]
+ 
+ if not CONFIG["MOZ_SYSTEM_ICU"]:
 diff --git a/intl/components/src/Locale.cpp b/intl/components/src/Locale.cpp
-index 9a043518cf..a8d3733212 100644
+index 718d881..cda3fd9 100644
 --- a/intl/components/src/Locale.cpp
 +++ b/intl/components/src/Locale.cpp
-@@ -24,11 +24,78 @@
+@@ -20,11 +20,78 @@
  
  #include "unicode/uloc.h"
  #include "unicode/utypes.h"
@@ -121,12 +123,12 @@ index 9a043518cf..a8d3733212 100644
  bool IsStructurallyValidLanguageTag(Span<const CharT> aLanguage) {
    // unicode_language_subtag = alpha{2,3} | alpha{5,8};
 diff --git a/intl/components/src/Locale.h b/intl/components/src/Locale.h
-index 1f4e06f543..448486a479 100644
+index b7314ec..5426531 100644
 --- a/intl/components/src/Locale.h
 +++ b/intl/components/src/Locale.h
-@@ -190,8 +190,11 @@ using UniqueChars = UniquePtr<char[]>;
-  */
- class MOZ_STACK_CLASS Locale final {
+@@ -208,8 +208,11 @@ class MOZ_STACK_CLASS Locale final {
+ 
+  private:
    LanguageSubtag mLanguage = {};
 +  mutable LanguageSubtag mRotundaLanguage = {};
    ScriptSubtag mScript = {};
@@ -134,9 +136,9 @@ index 1f4e06f543..448486a479 100644
    RegionSubtag mRegion = {};
 +  mutable RegionSubtag mRotundaRegion = {};
  
-   using VariantsVector = Vector<UniqueChars, 2>;
-   using ExtensionsVector = Vector<UniqueChars, 2>;
-@@ -314,9 +317,28 @@ class MOZ_STACK_CLASS Locale final {
+   VariantsVector mVariants;
+   ExtensionsVector mExtensions;
+@@ -338,9 +341,28 @@ class MOZ_STACK_CLASS Locale final {
      }
    };
  
@@ -164,11 +166,11 @@ index 1f4e06f543..448486a479 100644
 +    }
 +    return mRegion;
 +  }
-+  
++
    auto Variants() const { return SubtagEnumeration(mVariants); }
    auto Extensions() const { return SubtagEnumeration(mExtensions); }
    Maybe<Span<const char>> PrivateUse() const {
-@@ -483,7 +505,15 @@ class MOZ_STACK_CLASS Locale final {
+@@ -518,7 +540,15 @@ class MOZ_STACK_CLASS Locale final {
     *
     * Also see <https://unicode-org.github.io/icu/userguide/locale>.
     */
@@ -186,10 +188,10 @@ index 1f4e06f543..448486a479 100644
    /**
     * Returns an iterator over all supported locales.
 diff --git a/intl/locale/OSPreferences.cpp b/intl/locale/OSPreferences.cpp
-index b87924b61a..2eaa960c04 100644
+index b185d97..b9e80f2 100644
 --- a/intl/locale/OSPreferences.cpp
 +++ b/intl/locale/OSPreferences.cpp
-@@ -406,6 +406,10 @@ bool OSPreferences::GetDateTimeConnectorPattern(const nsACString& aLocale,
+@@ -410,6 +410,10 @@ bool OSPreferences::GetDateTimeConnectorPattern(const nsACString& aLocale,
   */
  NS_IMETHODIMP
  OSPreferences::GetSystemLocales(nsTArray<nsCString>& aRetVal) {
@@ -200,7 +202,7 @@ index b87924b61a..2eaa960c04 100644
    if (!mSystemLocales.IsEmpty()) {
      aRetVal = mSystemLocales.Clone();
      return NS_OK;
-@@ -425,7 +429,10 @@ OSPreferences::GetSystemLocales(nsTArray<nsCString>& aRetVal) {
+@@ -429,7 +433,10 @@ OSPreferences::GetSystemLocales(nsTArray<nsCString>& aRetVal) {
  
  NS_IMETHODIMP
  OSPreferences::GetSystemLocale(nsACString& aRetVal) {
@@ -212,7 +214,7 @@ index b87924b61a..2eaa960c04 100644
      aRetVal = mSystemLocales[0];
    } else {
      AutoTArray<nsCString, 10> locales;
-@@ -439,6 +446,10 @@ OSPreferences::GetSystemLocale(nsACString& aRetVal) {
+@@ -443,6 +450,10 @@ OSPreferences::GetSystemLocale(nsACString& aRetVal) {
  
  NS_IMETHODIMP
  OSPreferences::GetRegionalPrefsLocales(nsTArray<nsCString>& aRetVal) {

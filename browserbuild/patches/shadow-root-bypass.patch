@@ -1,14 +1,13 @@
 diff --git a/dom/webidl/Element.webidl b/dom/webidl/Element.webidl
-index 7163fac826..c0c201e29d 100644
 --- a/dom/webidl/Element.webidl
 +++ b/dom/webidl/Element.webidl
-@@ -288,6 +288,9 @@ partial interface Element {
-   [BinaryName="shadowRootByMode"]
+@@ -291,6 +291,9 @@ partial interface Element {
+   [BinaryName="shadowRootForBindings"]
    readonly attribute ShadowRoot? shadowRoot;
  
-+  [Func="Document::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
++  [NeedsSubjectPrincipal, Func="Document::IsCallerChromeOrAddon", BinaryName="openOrClosedShadowRoot"]
 +  readonly attribute ShadowRoot? shadowRootUnl;
 +
-   [Func="Document::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
+   [NeedsSubjectPrincipal, Func="Document::IsCallerChromeOrAddon"]
    readonly attribute ShadowRoot? openOrClosedShadowRoot;
  

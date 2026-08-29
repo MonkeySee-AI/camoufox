@@ -47,7 +47,12 @@ from .geo.geolocation import geoip_allowed, get_geolocation
 from .geo.ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .geo.locales import handle_locale
 from .pkgman import OS_NAME, get_path, installed_verstr, launch_path
-from .settings import ROTUNDA_MACOS_BACKGROUND_WINDOWS, RotundaSettings
+from .settings import (
+    ROTUNDA_CONFIG_JSON,
+    ROTUNDA_CONFIG_PATH,
+    ROTUNDA_MACOS_BACKGROUND_WINDOWS,
+    RotundaSettings,
+)
 from .virtdisplay import VirtualDisplay
 
 ListOrString: TypeAlias = tuple[str, ...] | list[str] | str
@@ -361,13 +366,15 @@ def get_env_vars(
     executable_path: str | Path | None = None,
 ) -> dict[str, str | float | bool]:
     """
-    Validate and serialize a config map into a runtime profile JSON file.
+    Validate and serialize a config map into the runtime profile environment.
 
-    The browser bootstrap code reads `ROTUNDA_CONFIG_PATH` before Firefox starts.
+    Firefox children inherit the JSON because their sandbox may block file access.
+    The profile file remains available for existing Python-side consumers.
     On Linux, `executable_path` lets packaged browser artifacts supply their own
     fontconfig and font resources without requiring an installed Rotunda bundle.
     """
     profile = _build_runtime_profile(config)
+    profile_json = orjson.dumps(profile)
 
     with tempfile.NamedTemporaryFile(
         mode="wb",
@@ -375,10 +382,13 @@ def get_env_vars(
         suffix=".json",
         delete=False,
     ) as handle:
-        handle.write(orjson.dumps(profile))
+        handle.write(profile_json)
         config_path = handle.name
 
-    env_vars: dict[str, str | float | bool] = {"ROTUNDA_CONFIG_PATH": config_path}
+    env_vars: dict[str, str | float | bool] = {
+        ROTUNDA_CONFIG_PATH: config_path,
+        ROTUNDA_CONFIG_JSON: profile_json.decode(),
+    }
 
     if OS_NAME == "lin":
         fontconfig_path, fonts_path = _resolve_linux_font_resources(

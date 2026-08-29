@@ -229,7 +229,7 @@ index b2a1203401..6ebecc8c1e 100644
  #include "mozilla/ipc/ProtocolUtils.h"
  #include "mozilla/net/CookieServiceParent.h"
  #include "mozilla/net/NeckoParent.h"
-@@ -1112,6 +1120,172 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
+@@ -1132,6 +1140,172 @@ already_AddRefed<mozilla::dom::Promise> WindowGlobalParent::DrawSnapshot(
    return promise.forget();
  }
  
@@ -399,9 +399,9 @@ index b2a1203401..6ebecc8c1e 100644
 +  return IPC_OK();
 +}
 +
- void WindowGlobalParent::DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
-                                               const Maybe<IntRect>& aRect,
-                                               float aScale,
+ void WindowGlobalParent::DrawSnapshotInternal(
+     gfx::CrossProcessPaint* aPaint, const Maybe<IntRect>& aRect, float aScale,
+     nscolor aBackgroundColor, gfx::CrossProcessPaintFlags aFlags) {
 @@ -1590,6 +1764,10 @@ IPCResult WindowGlobalParent::RecvGetStorageAccessPermission(
  }
  
@@ -503,24 +503,25 @@ index cfff60b3c1..a776b2ecbe 100644
  
  namespace mozilla {
  extern LazyLogModule sPEMLog;
-@@ -62,8 +63,14 @@ static CFDictionaryRef BuildEncoderSpec(const bool aHardwareNotAllowed,
+@@ -69,8 +70,15 @@ static CFDictionaryRef BuildEncoderSpec(const bool aHardwareNotAllowed,
  static void FrameCallback(void* aEncoder, void* aFrameRefCon, OSStatus aStatus,
                            VTEncodeInfoFlags aInfoFlags,
                            CMSampleBufferRef aSampleBuffer) {
 -  (static_cast<AppleVTEncoder*>(aEncoder))
--      ->OutputFrame(aStatus, aInfoFlags, aSampleBuffer);
+-      ->OutputFrame(aStatus, aInfoFlags, aSampleBuffer, aFrameRefCon);
 +  AppleVTEncoder* encoder = static_cast<AppleVTEncoder*>(aEncoder);
-+  if (aFrameRefCon) {
++  if (aFrameRefCon && aFrameRefCon != kForcedKeyframeRefcon) {
 +    encoder->OutputPipelinedFrame(
 +        static_cast<MediaDataEncoder::EncodePromise::Private*>(aFrameRefCon),
 +        aStatus, aInfoFlags, aSampleBuffer);
 +  } else {
-+    encoder->OutputFrame(aStatus, aInfoFlags, aSampleBuffer);
++    encoder->OutputFrame(aStatus, aInfoFlags, aSampleBuffer,
++                         aFrameRefCon);
 +  }
  }
  
  bool AppleVTEncoder::SetAverageBitrate(uint32_t aBitsPerSec) {
-@@ -421,13 +428,16 @@ MediaResult AppleVTEncoder::InitSession() {
+@@ -431,13 +440,16 @@ MediaResult AppleVTEncoder::InitSession() {
         lowLatencyRateControl ? "yes" : "no",
         mHardwareNotAllowed ? "no" : "yes");
    AutoCFTypeRef<CFDictionaryRef> spec(
@@ -528,8 +529,8 @@ index cfff60b3c1..a776b2ecbe 100644
 +      BuildEncoderSpec(mHardwareNotAllowed,
 +                       lowLatencyRateControl && mConfig.mCodec == CodecType::H264));
  
-   // Bug 1955153: Set sourceImageBufferAttributes using the pixel format derived
-   // from mConfig.mFormat.
+   // Bug 1955153: Set sourceImageBufferAttributes using the pixel
+   // format derived from mConfig.mFormat.
    OSStatus status = VTCompressionSessionCreate(
        kCFAllocatorDefault, mConfig.mSize.width, mConfig.mSize.height,
 -      kCMVideoCodecType_H264, spec, nullptr /* sourceImageBufferAttributes */,
@@ -617,7 +618,7 @@ index cfff60b3c1..a776b2ecbe 100644
 +                                          VTEncodeInfoFlags aFlags,
 +                                          CMSampleBufferRef aBuffer) {
 +  RefPtr<EncodePromise::Private> promise = aPromise;
-+  OutputFrame(aStatus, aFlags, aBuffer);
++  OutputFrame(aStatus, aFlags, aBuffer, nullptr);
 +  RefPtr<AppleVTEncoder> self = this;
 +  (void)mTaskQueue->Dispatch(NS_NewRunnableFunction(
 +      "AppleVTEncoder::CompletePipelinedEncode",
@@ -627,7 +628,7 @@ index cfff60b3c1..a776b2ecbe 100644
  void AppleVTEncoder::ProcessOutput(RefPtr<MediaRawData>&& aOutput,
                                     EncodeResult aResult) {
    if (!mTaskQueue->IsCurrentThreadIn()) {
-@@ -869,6 +903,21 @@ RefPtr<MediaDataEncoder::EncodePromise> AppleVTEncoder::Encode(
+@@ -893,4 +927,19 @@ RefPtr<MediaDataEncoder::EncodePromise> AppleVTEncoder::Encode(
    });
  }
  
@@ -646,9 +647,7 @@ index cfff60b3c1..a776b2ecbe 100644
 +  return promise;
 +}
 +
- // TODO(Bug 1984936): For realtime mode, resolve the promise after the first
- // sample's result is available, then continue processing remaining samples.
- // This allows the caller to keep submitting new samples while the encoder
+ // TODO(Bug 1984936): For realtime mode, resolve the promise after
 @@ -954,6 +1003,74 @@ void AppleVTEncoder::ProcessEncode(const RefPtr<const VideoData>& aSample) {
    ForceOutputIfNeeded();
  }
@@ -787,17 +786,13 @@ index 939313d0a8..02d9e60227 100644
    RefPtr<ReconfigurationPromise> Reconfigure(
        const RefPtr<const EncoderConfigurationChangeList>& aConfigurationChanges)
        override;
-@@ -54,12 +56,19 @@ class AppleVTEncoder final : public MediaDataEncoder {
- 
+@@ -55,2 +57,5 @@ class AppleVTEncoder final : public MediaDataEncoder {
    void OutputFrame(OSStatus aStatus, VTEncodeInfoFlags aFlags,
-                    CMSampleBufferRef aBuffer);
--
+                    CMSampleBufferRef aBuffer, void* aSourceFrameRefcon);
 +  void OutputPipelinedFrame(EncodePromise::Private* aPromise,
 +                            OSStatus aStatus, VTEncodeInfoFlags aFlags,
 +                            CMSampleBufferRef aBuffer);
-  private:
-   enum class EncodeResult { Success, EncodeError, FrameDropped, EmptyBuffer };
- 
+@@ -61,2 +66,7 @@ class AppleVTEncoder final : public MediaDataEncoder {
    virtual ~AppleVTEncoder() { MOZ_ASSERT(!mSession); }
    void ProcessEncode(const RefPtr<const VideoData>& aSample);
 +  void ProcessPipelinedEncode(
@@ -805,9 +800,6 @@ index 939313d0a8..02d9e60227 100644
 +      const RefPtr<EncodePromise::Private>& aPromise);
 +  void CompletePipelinedEncode(
 +      const RefPtr<EncodePromise::Private>& aPromise);
-   RefPtr<ReconfigurationPromise> ProcessReconfigure(
-       const RefPtr<const EncoderConfigurationChangeList>&
-           aConfigurationChanges);
 @@ -99,6 +108,7 @@ class AppleVTEncoder final : public MediaDataEncoder {
    MozPromiseHolder<EncodePromise> mEncodePromise;
    MozPromiseHolder<EncodePromise> mEncodeBatchPromise;
@@ -864,12 +856,12 @@ index baa8899738..611abc62e7 100644
  
 +#include <cmath>
 +
- #include "mozilla/dom/CanonicalBrowsingContext.h"
- #include "mozilla/dom/ContentProcessManager.h"
+ #include "gfxPlatform.h"
+ #include "mozilla/Logging.h"
 +#include "mozilla/dom/Element.h"
- #include "mozilla/dom/ImageBitmap.h"
+ #include "mozilla/PresShell.h"
  #include "mozilla/dom/BrowserParent.h"
- #include "mozilla/dom/PWindowGlobalParent.h"
+ #include "mozilla/dom/CanonicalBrowsingContext.h"
 @@ -22,7 +25,10 @@
  #include "gfxPlatform.h"
  
