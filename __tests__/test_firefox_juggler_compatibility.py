@@ -20,3 +20,16 @@ def test_firefox_154_juggler_apis_are_preserved() -> None:
     assert "browsingContext.topChromeWindow;" in page_handler
     assert "this._tab.linkedBrowser.documentGlobal" in target_registry
     assert "safeForUntrustedWebProcess: true" in actor
+
+    page_agent = (JUGGLER / "content/PageAgent.js").read_text()
+    assert "win.synthesizeMouseEvent(type, x, y" in page_agent
+    assert "toWindow: true" in page_agent
+
+
+def test_firefox_154_stock_javascript_surfaces_are_enabled() -> None:
+    settings = (ROOT / "browserbuild/settings/rotunda.cfg").read_text()
+    policies = (ROOT / "browserbuild/settings/distribution/policies.json").read_text()
+
+    # These stock desktop surfaces must not be hidden by Rotunda's pinned prefs.
+    assert 'defaultPref("dom.documentpip.enabled", true);' in settings
+    assert '"DefaultSerialGuardSetting": 3' in policies

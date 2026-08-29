@@ -253,6 +253,7 @@ export class PageAgent {
         describeNode: this._describeNode.bind(this),
         dispatchKeyEvent: this._dispatchKeyEvent.bind(this),
         dispatchDragEvent: this._dispatchDragEvent.bind(this),
+        dispatchMouseEvent: this._dispatchMouseEvent.bind(this),
         dispatchTouchEvent: this._dispatchTouchEvent.bind(this),
         dispatchTapEvent: this._dispatchTapEvent.bind(this),
         getContentQuads: this._getContentQuads.bind(this),
@@ -654,6 +655,25 @@ export class PageAgent {
       touchPoints.map(point => 0),
       touchPoints.map(point => 0),
       modifiers);
+    return {defaultPrevented};
+  }
+
+  _dispatchMouseEvent({type, x, y, button, clickCount, modifiers, buttons}) {
+    const win = this._frameTree.mainFrame().domWindow();
+    const defaultPrevented = win.synthesizeMouseEvent(type, x, y, {
+      identifier: win.windowUtils.DEFAULT_MOUSE_POINTER_ID,
+      button,
+      buttons,
+      clickCount,
+      pressure: 0.0,
+      inputSource: 0,
+      modifiers,
+    }, {
+      toWindow: true,
+      isDOMEventSynthesized: true,
+      isWidgetEventSynthesized: false,
+      convertToPointer: true,
+    });
     return {defaultPrevented};
   }
 

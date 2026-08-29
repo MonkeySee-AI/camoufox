@@ -17,7 +17,6 @@ const Cu = Components.utils;
 const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
 const helper = new Helper();
 const HUMANIZED_MOUSE_INTERVAL_MS = 10;
-const HUMANIZED_MOUSEMOVE_ACK_TIMEOUT_MS = 250;
 
 function hashConsoleMessage(params) {
   return params.location.lineNumber + ':' + params.location.columnNumber + ':' + params.location.url;
@@ -597,7 +596,7 @@ export class PageHandler {
         // Cursor overlay is optional; never block input dispatch.
       }
     };
-    const sendEvents = async (types, eventX = x, eventY = y, overlayType = null, options = {}) => {
+    const sendEvents = async (types, eventX = x, eventY = y, overlayType = null) => {
       // 1. Scroll element to the desired location first; the coordinates are relative to the element.
       this._pageTarget._linkedBrowser.scrollRectIntoViewIfNeeded(eventX, eventY, 0, 0);
       // 2. Get element's bounding box in the browser after the scroll is completed.
@@ -606,49 +605,24 @@ export class PageHandler {
       if (win.windowUtils.flushApzRepaints())
         await helper.awaitTopic('apz-repaints-flushed');
 
-      const watcher = new EventWatcher(this._pageEventSink, types, this._pendingEventWatchers);
-      const promises = [];
       for (const type of types) {
-        // Protocol callers speak in web-content coordinates. Gecko's synthetic
-        // event API wants chrome-window coordinates, so offset by the linked
-        // browser's current box after any scroll adjustment.
+        // Protocol callers speak in web-content coordinates. The optional
+        // chrome cursor overlay needs the linked browser's window offset.
         const chromeX = eventX + boundingBox.left;
         const chromeY = eventY + boundingBox.top;
         // The renderer still gets the real DOM mouse event type. The overlay can
         // receive a higher-level visual phase, e.g. "clicksettle", when we want
         // the cursor graphic to prepare for a click without changing dispatch.
         notifyCursorOverlay(overlayType || type, chromeX, chromeY);
-        // This dispatches to the renderer synchronously.
-        const jugglerEventId = win.windowUtils.jugglerSendMouseEvent(
+        await this._contentPage.send('dispatchMouseEvent', {
           type,
-          chromeX,
-          chromeY,
+          x: eventX,
+          y: eventY,
           button,
           clickCount,
           modifiers,
-          false /* aIgnoreRootScrollFrame */,
-          0.0 /* pressure */,
-          0 /* inputSource */,
-          true /* isDOMEventSynthesized */,
-          false /* isWidgetEventSynthesized */,
           buttons,
-          win.windowUtils.DEFAULT_MOUSE_POINTER_ID /* pointerIdentifier */,
-          false /* disablePointerEvent */
-        );
-        const eventPromise = watcher.ensureEvent(type, eventObject => eventObject.jugglerEventId === jugglerEventId);
-        if (options.timeoutMs) {
-          promises.push(Promise.race([
-            eventPromise.catch(() => null),
-            new Promise(resolve => setTimeout(() => resolve(null), options.timeoutMs)),
-          ]));
-        } else {
-          promises.push(eventPromise);
-        }
-      }
-      try {
-        await Promise.all(promises);
-      } finally {
-        watcher.dispose();
+        });
       }
     };
     const createHumanizedMouseScheduler = points => {
@@ -713,7 +687,7 @@ export class PageHandler {
         // For click-bound paths, start settling the visual cursor over the final
         // few move events so the arrow is upright before mousedown lands.
         const overlayType = settleForClick && i >= points.length - 3 ? 'clicksettle' : null;
-        await sendEvents(['mousemove'], point.x, point.y, overlayType, {timeoutMs: HUMANIZED_MOUSEMOVE_ACK_TIMEOUT_MS});
+        await sendEvents(['mousemove'], point.x, point.y, overlayType);
       }
     };
 
