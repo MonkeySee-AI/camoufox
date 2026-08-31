@@ -1547,9 +1547,9 @@ async def test_page_pause_should_reset_custom_timeouts(
     if not headless:
         pytest.skip()
 
+    await page.goto(server.EMPTY_PAGE)
     page.set_default_timeout(123)
     page.set_default_navigation_timeout(456)
-    await page.goto(server.EMPTY_PAGE)
     await page.pause()
     with pytest.raises(Error, match="Timeout 123ms exceeded."):
         await page.get_by_text("foo").click()
