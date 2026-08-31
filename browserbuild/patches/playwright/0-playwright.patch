@@ -1347,6 +1347,18 @@ diff --git a/dom/geolocation/Geolocation.cpp b/dom/geolocation/Geolocation.cpp
 index 20a3ede..9fb873c 100644
 --- a/dom/geolocation/Geolocation.cpp
 +++ b/dom/geolocation/Geolocation.cpp
+@@ -104,6 +104,10 @@ class nsGeolocationRequest final : public ContentPermissionRequestBase,
+   NS_IMETHOD GetIgnoreAllowSitePermission(
+       bool* aIgnoreAllowSitePermission) override {
++    RefPtr<GeolocationService> gs =
++        GeolocationService::GetGeolocationService(
++            mLocator->GetBrowsingContext());
+     *aIgnoreAllowSitePermission =
+-        mBehavior != geolocation::SystemGeolocationPermissionBehavior::NoPrompt;
++        mBehavior != geolocation::SystemGeolocationPermissionBehavior::NoPrompt &&
++        !gs->IsOverride();
+     return NS_OK;
+   }
 @@ -409,7 +409,10 @@ nsGeolocationRequest::Allow(JS::Handle<JS::Value> aChoices) {
          self->Cancel();
        };
